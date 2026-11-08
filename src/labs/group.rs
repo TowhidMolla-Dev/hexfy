@@ -63,6 +63,7 @@ impl Feature {
             | Self::QuitClosesWindow
             | Self::SettingsSearch
             | Self::Playground => Group::Dictation,
+            Self::EdgeGlow => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols

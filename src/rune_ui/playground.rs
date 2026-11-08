@@ -192,6 +192,10 @@ const PATHS: &[(&str, &str)] = &[
     ("history-clear", "Window/History/Clear all asks first"),
     ("history-stats", "Window/History/Stats dialog"),
     ("history-empty", "Window/History/Empty"),
+    (
+        "mac-settings-hud-visualization",
+        "Window/General/Dictation HUD visualization",
+    ),
     #[cfg(hex_capture)]
     ("mac-scrawl", "Window/Annotate/On"),
     #[cfg(hex_capture)]

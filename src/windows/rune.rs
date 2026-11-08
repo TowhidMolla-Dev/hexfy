@@ -316,6 +316,7 @@ fn run_runtime(
     let mut tray_view = None;
     let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
+    indicator.set_visualization(settings.indicator_visualization);
     let mut host = WindowsDesktopHost::new(
         event_path,
         settings,

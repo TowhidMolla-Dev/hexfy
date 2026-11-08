@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use rune::compose::{Compositor, Frame};
 use rune::{Cx, El, LiveRegion, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
-use crate::app_settings::IndicatorPosition;
+use crate::app_settings::{IndicatorPosition, IndicatorVisualization};
 use crate::desktop::i18n::tr;
 use crate::dictation::indicator::{DictationIndicatorEvent, DotFrame, IndicatorModel};
 use crate::rune_hud::dot_scope::MAX_DOTS;
@@ -94,6 +94,7 @@ pub(crate) struct HudSender {
 #[derive(Default)]
 struct Watch {
     position: IndicatorPosition,
+    visualization: IndicatorVisualization,
     /// The overlay failure last logged, so each is logged once.
     logged: Option<String>,
     described: bool,
@@ -141,7 +142,11 @@ impl HudSender {
         if matches!(&event, HudEvent::Started) {
             let presents = self.overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
-            if watch.position != IndicatorPosition::Hidden && watch.pending.is_none() {
+            if watch.visualization != IndicatorVisualization::Off
+                && (watch.visualization == IndicatorVisualization::EdgeGlow
+                    || watch.position != IndicatorPosition::Hidden)
+                && watch.pending.is_none()
+            {
                 watch.pending = Some((Instant::now(), presents));
             }
         }
@@ -166,6 +171,18 @@ impl HudSender {
         }
         self.overlay
             .update(move |hud, _| hud.set_position(position));
+    }
+
+    pub(crate) fn set_visualization(&self, visualization: IndicatorVisualization) {
+        #[cfg(target_os = "windows")]
+        {
+            self.watch
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .visualization = visualization;
+        }
+        self.overlay
+            .update(move |hud, _| hud.set_visualization(visualization));
     }
 
     /// Why Windows could not show the HUD, for Settings: Rune's reason, or a
@@ -227,6 +244,7 @@ pub(crate) struct Hud {
     /// Where the plate sits in the window (macOS placements).
     layout: Layout,
     position: IndicatorPosition,
+    visualization: IndicatorVisualization,
     /// The overlay itself, to show and hide it.
     this: Option<OverlayHandle<Hud>>,
     shown: bool,
@@ -240,6 +258,7 @@ pub(crate) struct Hud {
     /// display; a capture's start or a hide picks the display again.
     #[cfg(not(target_os = "macos"))]
     edge_placed: Option<IndicatorPosition>,
+    full_screen_placed: bool,
     /// When the HUD last checked which display the pointer is on.
     #[cfg(not(target_os = "macos"))]
     followed: Option<Instant>,
@@ -288,6 +307,14 @@ impl Hud {
         }
     }
 
+    fn set_visualization(&mut self, visualization: IndicatorVisualization) {
+        self.visualization = visualization;
+        self.unplace();
+        if self.shown {
+            self.show();
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     fn set_position(&mut self, position: IndicatorPosition) {
         self.position = position;
@@ -305,7 +332,11 @@ impl Hud {
         {
             self.position = crate::app_settings::indicator_position();
         }
-        if self.position == IndicatorPosition::Hidden {
+        self.visualization = effective_visualization();
+        if self.visualization == IndicatorVisualization::Off
+            || (self.visualization == IndicatorVisualization::Pill
+                && self.position == IndicatorPosition::Hidden)
+        {
             #[cfg(target_os = "macos")]
             self.place_live_text_without_hud();
             #[cfg(not(target_os = "macos"))]
@@ -317,23 +348,41 @@ impl Hud {
             return;
         }
         #[cfg(target_os = "macos")]
-        self.place_on_pointer_screen(&overlay);
+        if self.visualization == IndicatorVisualization::EdgeGlow {
+            overlay.set_display(rune::DisplayTarget::UnderPointer);
+            if !self.full_screen_placed {
+                overlay.set_placement(Some(rune::OverlayPlacement::FullScreen));
+                self.full_screen_placed = true;
+            }
+            self.layout = Layout::default();
+        } else {
+            self.place_on_pointer_screen(&overlay);
+        }
         #[cfg(not(target_os = "macos"))]
         {
-            let (edge, margin) = match self.position {
-                IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
-                _ => (ScreenEdge::Top, TOP_OFFSET),
-            };
-            // Placing picks the display again (`display`); while shown, the
-            // HUD follows the pointer to another display at its own pace
-            // (`follow_pointer`).
-            if self.edge_placed != Some(self.position) {
-                overlay.place(edge, margin);
-                self.edge_placed = Some(self.position);
+            if self.visualization == IndicatorVisualization::EdgeGlow {
+                overlay.set_display(display());
+                if !self.full_screen_placed {
+                    overlay.set_placement(Some(rune::OverlayPlacement::FullScreen));
+                    self.full_screen_placed = true;
+                }
+                set_live_text(Spot::Edge(ScreenEdge::Top, TOP_OFFSET + 34.0));
+            } else {
+                let (edge, margin) = match self.position {
+                    IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
+                    _ => (ScreenEdge::Top, TOP_OFFSET),
+                };
+                // Placing picks the display again (`display`); while shown, the
+                // HUD follows the pointer to another display at its own pace
+                // (`follow_pointer`).
+                if self.edge_placed != Some(self.position) {
+                    overlay.place(edge, margin);
+                    self.edge_placed = Some(self.position);
+                }
+                // The plate sits in the middle of the window.
+                let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
+                set_live_text(Spot::Edge(edge, past_plate));
             }
-            // The plate sits in the middle of the window.
-            let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
-            set_live_text(Spot::Edge(edge, past_plate));
         }
         if !self.shown {
             overlay.show();
@@ -368,6 +417,7 @@ impl Hud {
 
     /// The next show places the overlay again.
     fn unplace(&mut self) {
+        self.full_screen_placed = false;
         #[cfg(not(target_os = "macos"))]
         {
             self.edge_placed = None;
@@ -376,6 +426,15 @@ impl Hud {
         {
             self.placed = None;
         }
+    }
+}
+
+fn effective_visualization() -> IndicatorVisualization {
+    let selected = crate::app_settings::indicator_visualization();
+    if selected == IndicatorVisualization::EdgeGlow && !crate::app_settings::edge_glow_enabled() {
+        IndicatorVisualization::Pill
+    } else {
+        selected
     }
 }
 
@@ -474,6 +533,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             drawn: None,
             layout: Layout::default(),
             position: IndicatorPosition::Top,
+            visualization: IndicatorVisualization::Pill,
             this: None,
             shown: false,
             reduce: false,
@@ -482,6 +542,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             placed: None,
             #[cfg(not(target_os = "macos"))]
             edge_placed: None,
+            full_screen_placed: false,
             #[cfg(not(target_os = "macos"))]
             followed: None,
         },
@@ -583,7 +644,7 @@ const DOT_BYTES: u64 = (MAX_DOTS * 4) as u64;
 const DOT_UNIFORM_BINDING: &str = "@group(0) @binding(0) var<uniform> u: DotUniforms;";
 
 impl DotUniforms {
-    fn new(frame: &DotFrame, layout: Layout, target: Target) -> Self {
+    fn new(frame: &DotFrame, layout: Layout, target: Target, edge_glow: bool) -> Self {
         let pose = &frame.pose;
         // An island is black in either appearance and draws no plate.
         let dark = target.dark || layout.island.is_some();
@@ -630,9 +691,15 @@ impl DotUniforms {
                 .map_or([0.0; 4], |island| island_shape(island, pose)),
             // The ears draw glyphs, not the field: the notch's half width,
             // the mode, the voice, and the stage's clock.
-            field: match layout.island {
-                Some(island) if island.ears => [island.notch[0] / 2.0, 1.0, pose.level, pose.clock],
-                _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
+            field: if edge_glow {
+                [0.0, 0.0, pose.clock, -1.0]
+            } else {
+                match layout.island {
+                    Some(island) if island.ears => {
+                        [island.notch[0] / 2.0, 1.0, pose.level, pose.clock]
+                    }
+                    _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
+                }
             },
             ears: [pose.done, pose.fail, 0.0, 0.0],
         }
@@ -741,6 +808,9 @@ impl Compositor<Hud> for HudCompositor {
     fn render(&mut self, f: &mut Frame<'_, Hud>) {
         let reduce = f.rt.reduced_motion;
         let target = Target::whole(f.size, f.rt.env.scale, f.rt.env.system_dark);
+        let edge_glow = f.rt.state.visualization == IndicatorVisualization::EdgeGlow;
+        let device_key = f.device_key();
+        let format = f.format;
         let hud = &mut f.rt.state;
         hud.reduce = reduce;
         if hud.model.active() {
@@ -764,15 +834,15 @@ impl Compositor<Hud> for HudCompositor {
         if self
             .gpu
             .as_ref()
-            .is_none_or(|(device, gpu)| *device != f.device_key() || gpu.format != f.format)
+            .is_none_or(|(device, gpu)| *device != device_key || gpu.format != format)
         {
             tracing::info!(gpu = %rune::describe_gpu(f.device), "HUD draws");
             let painter =
-                prebuilt(f.device, f.format).unwrap_or_else(|| Painter::new(f.device, f.format));
-            self.gpu = Some((f.device_key(), painter));
+                prebuilt(f.device, format).unwrap_or_else(|| Painter::new(f.device, format));
+            self.gpu = Some((device_key, painter));
         }
         let (_, gpu) = self.gpu.as_ref().expect("created above");
-        let uniforms = gpu.write(&drawn, layout, target, |buffer, data| {
+        let uniforms = gpu.write(&drawn, layout, target, edge_glow, |buffer, data| {
             f.write_buffer(buffer, 0, data)
         });
         gpu.draw(f.encoder, f.target, &uniforms);
@@ -912,9 +982,10 @@ impl Painter {
         frame: &DotFrame,
         layout: Layout,
         target: Target,
+        edge_glow: bool,
         mut write: impl FnMut(&wgpu::Buffer, &[u8]),
     ) -> DotUniforms {
-        let uniforms = DotUniforms::new(frame, layout, target);
+        let uniforms = DotUniforms::new(frame, layout, target, edge_glow);
         if let Some(buffer) = &self.dot_uniforms {
             write(buffer, bytes(&uniforms));
         }

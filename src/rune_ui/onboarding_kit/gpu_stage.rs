@@ -123,9 +123,13 @@ impl OnboardingGpu {
             let painter = hud.painters.entry(site.format).or_insert_with(|| {
                 Painter::with_color_space(f.device, site.format, !site.srgb_blend)
             });
-            let uniforms = painter.write(&hud.frame, Layout::default(), target, |buffer, bytes| {
-                f.queue.write_buffer(buffer, 0, bytes)
-            });
+            let uniforms = painter.write(
+                &hud.frame,
+                Layout::default(),
+                target,
+                false,
+                |buffer, bytes| f.queue.write_buffer(buffer, 0, bytes),
+            );
             painter.draw_slot(pass, target, &uniforms);
         });
         self.huds.retain(|_, hud| hud.seen);
