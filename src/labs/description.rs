@@ -156,6 +156,9 @@ impl Feature {
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and transcribes"
             }
+            Self::EdgeGlow => {
+                "Show a soft, animated multicolor glow around the screen while dictating; choose Edge glow, Pill, or Off in General"
+            }
         }
     }
 }

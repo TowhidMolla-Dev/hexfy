@@ -804,6 +804,7 @@ impl Runtime {
                 {
                     self.supersede_automatic();
                 }
+                self.hud.set_visualization(settings.indicator_visualization);
                 self.settings = settings;
             }
             Err(error) => tracing::warn!(%error, "could not reload settings"),

@@ -84,6 +84,8 @@ pub struct LabsSettings {
     pub meeting_notes_vocabulary: bool,
     /// At either visible indicator position, the HUD grows out of the notch on a screen with one (macOS).
     pub notch_indicator: bool,
+    /// Enables the experimental edge-glow dictation visualization.
+    pub edge_glow: bool,
     /// The local API's `GET /meetings/events` tells a subscriber each finished meeting's id (issue 964).
     pub meeting_finished_event: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
@@ -160,6 +162,7 @@ impl Default for LabsSettings {
             gnome_clipboard_restore: false,
             meeting_notes_vocabulary: false,
             notch_indicator: false,
+            edge_glow: false,
             meeting_finished_event: false,
             annotate_replay: false,
             more_call_apps: false,

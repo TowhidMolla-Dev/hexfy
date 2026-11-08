@@ -120,10 +120,11 @@ pub enum Feature {
     QuitClosesWindow,
     ExpireMeetingAudio,
     CapsLockDictation,
+    EdgeGlow,
 }
 
 impl Feature {
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 58] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -181,6 +182,7 @@ impl Feature {
         Self::QuitClosesWindow,
         Self::ExpireMeetingAudio,
         Self::CapsLockDictation,
+        Self::EdgeGlow,
     ];
 
     /// The features this OS and build have.
@@ -262,7 +264,8 @@ impl Feature {
             | Self::NotchIndicator
             | Self::QuitClosesWindow
             | Self::GnomeAnnotate
-            | Self::CapsLockDictation => Audience::Everyone,
+            | Self::CapsLockDictation
+            | Self::EdgeGlow => Audience::Everyone,
         }
     }
 
@@ -323,7 +326,7 @@ impl Feature {
             | Self::CapsLockDictation
             | Self::ExpireMeetingAudio
             | Self::FailureNotices => 20261107,
-            Self::GnomeAnnotate => 20261108,
+            Self::GnomeAnnotate | Self::EdgeGlow => 20261108,
         }
     }
 
@@ -420,7 +423,8 @@ impl Feature {
             | Self::MoreCallApps
             | Self::ExpireMeetingAudio
             | Self::SettingsSearch
-            | Self::FillerWords => true,
+            | Self::FillerWords
+            | Self::EdgeGlow => true,
         }
     }
 
@@ -484,6 +488,7 @@ impl Feature {
             Self::QuitClosesWindow => "quit-closes-window",
             Self::ExpireMeetingAudio => "expire-meeting-audio",
             Self::CapsLockDictation => "caps-lock-dictation",
+            Self::EdgeGlow => "edge-glow",
         }
     }
 
@@ -547,6 +552,7 @@ impl Feature {
             Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::ExpireMeetingAudio => "labs.expire_meeting_audio",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
+            Self::EdgeGlow => "labs.edge_glow",
         }
     }
 
@@ -614,6 +620,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation,
+            Self::EdgeGlow => settings.labs.edge_glow,
         }
     }
 
@@ -679,6 +686,7 @@ impl Feature {
             &mut labs.quit_closes_window,
             &mut labs.expire_meeting_audio,
             &mut labs.caps_lock_dictation,
+            &mut labs.edge_glow,
         ]
     }
 
@@ -744,6 +752,7 @@ impl Feature {
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,
             Self::ExpireMeetingAudio => settings.labs.expire_meeting_audio = on,
             Self::CapsLockDictation => settings.labs.caps_lock_dictation = on,
+            Self::EdgeGlow => settings.labs.edge_glow = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

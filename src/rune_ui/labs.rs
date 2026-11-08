@@ -819,6 +819,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::MeetingImport => "lab-meeting-import",
         Feature::MeetingDescriptiveFilenames => "lab-meeting-descriptive-filenames",
         Feature::ExpireMeetingAudio => "lab-expire-meeting-audio",
+        Feature::EdgeGlow => "lab-edge-glow",
     }
 }
 

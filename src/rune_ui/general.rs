@@ -20,7 +20,7 @@ use super::lists::{PermissionControl, permission_control, slider};
 use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
-use crate::app_settings::{IndicatorPosition, RecordingAudioBehavior, UpdateChannel};
+use crate::app_settings::{RecordingAudioBehavior, UpdateChannel};
 use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::login_item::LoginItemStatus;
@@ -28,6 +28,7 @@ use crate::desktop::onboarding::PermissionKind;
 use crate::transcription::models as transcription_models;
 
 mod search;
+mod visualization;
 
 pub(super) use self::search::{focus_search_key, pane};
 
@@ -967,33 +968,7 @@ pub(super) fn output(ui: &Ui, p: Paint, layer: &mut Vec<El>, query: &str) -> Vec
             pause_browser_rows(ui, p).into_iter().map(CardRow::from),
         );
     }
-    rows.push(
-        tr("Dictation HUD"),
-        pick_row(
-            ui,
-            p,
-            "indicator",
-            &PANEL,
-            tr("Dictation HUD"),
-            vec![tr("Top"), tr("Bottom"), tr("Off")],
-            match settings.indicator_position {
-                IndicatorPosition::Top => 0,
-                IndicatorPosition::Bottom => 1,
-                IndicatorPosition::Hidden => 2,
-            },
-            |ui, index| {
-                let position = [
-                    IndicatorPosition::Top,
-                    IndicatorPosition::Bottom,
-                    IndicatorPosition::Hidden,
-                ][index];
-                if ui.settings.indicator_position != position {
-                    ui.update(|settings| settings.indicator_position = position);
-                }
-            },
-            layer,
-        ),
-    );
+    visualization::rows(ui, p, layer, &mut rows);
     if ui.platform.caps.terminal_paste {
         rows.push_described(
             tr("Terminal paste"),

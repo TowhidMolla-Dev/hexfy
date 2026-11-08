@@ -1840,6 +1840,14 @@ fn platform_goldens() {
 }
 
 #[test]
+fn hud_visualization_goldens() {
+    let _goldens = Goldens::collect();
+    for dark in [true, false] {
+        check_golden("mac-settings-hud-visualization", dark, GOLDEN_SIZE);
+    }
+}
+
+#[test]
 fn voice_filter_saves_the_mode_and_applies_the_tuning_live() {
     use crate::audio::voice_filter::VoiceFilterMode;
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);

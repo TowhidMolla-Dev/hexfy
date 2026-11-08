@@ -568,6 +568,20 @@ pub(crate) fn run(
                 if next.indicator_position != settings.indicator_position {
                     indicator = LinuxIndicator::new(next.indicator_position);
                 }
+                if next.indicator_visualization != settings.indicator_visualization
+                    || next.labs.edge_glow != settings.labs.edge_glow
+                {
+                    LinuxIndicator::set_visualization(
+                        if next.indicator_visualization
+                            == crate::app_settings::IndicatorVisualization::EdgeGlow
+                            && !next.labs.edge_glow
+                        {
+                            crate::app_settings::IndicatorVisualization::Pill
+                        } else {
+                            next.indicator_visualization
+                        },
+                    );
+                }
                 if next.recording_audio_behavior != settings.recording_audio_behavior {
                     suppressor = crate::linux::audio_control::AudioSuppressor::dictation(
                         next.recording_audio_behavior,

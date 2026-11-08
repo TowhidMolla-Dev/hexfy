@@ -258,12 +258,12 @@ fn rune_hud_frames() {
     dump.extend(size.0.to_le_bytes());
     dump.extend(size.1.to_le_bytes());
     for (n, frame) in frames.iter().enumerate() {
-        dump.extend(bytes(&DotUniforms::new(frame, layout, target)));
+        dump.extend(bytes(&DotUniforms::new(frame, layout, target, false)));
         let mut packed = packed_dots(frame);
         packed.resize(DOT_BYTES as usize, 0);
         dump.extend(packed);
         let mut encoder = device.create_command_encoder(&Default::default());
-        let uniforms = gpu.write(frame, layout, target, |buffer, data| {
+        let uniforms = gpu.write(frame, layout, target, false, |buffer, data| {
             queue.write_buffer(buffer, 0, data)
         });
         gpu.draw(&mut encoder, &view, &uniforms);

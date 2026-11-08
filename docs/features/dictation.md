@@ -1691,9 +1691,13 @@ fullscreen app on a notched Mac is not yet observed.
 
 ### Dot scope
 
-The HUD is Dot scope on every OS ([rune_hud/dot_scope.rs](../../src/rune_hud/dot_scope.rs),
+The HUD defaults to Dot scope on every OS ([rune_hud/dot_scope.rs](../../src/rune_hud/dot_scope.rs),
 `dot_scope_fragment` in [rune_hud.wgsl](../../src/rune_hud.wgsl), drawn by
-a Rune overlay). It was the `dot-scope` experiment (#264) until 2026-10-29,
+a Rune overlay). With Labs › Edge glow on, General selects Edge glow, Pill,
+or Off; Edge glow uses a full-display click-through overlay and a soft animated
+rainbow around the screen edges, while Pill retains the existing placement
+choice (Top or Bottom). The selector is hidden while the lab is off, and the
+saved Edge glow choice falls back to Pill if the lab is turned off. It was the `dot-scope` experiment (#264) until 2026-10-29,
 when it replaced the glossy capsule, which Omarchy users on X called a
 "static red thingy"; the capsule's shader and HUD Lab styles are deleted. It is the t422 prototype's look A with its values.
 Linux and Windows draw it in a 304×80 pt window at the HUD's edge (no
@@ -1834,6 +1838,11 @@ per channel; on 2026-10-29 a headless capture on apollo showed recording,
 processing, and done after Dot scope became the default.
 Not yet observed on a real notched display, over a fullscreen app, or with
 a hidden menu bar.
+
+Labs › Edge glow's settings have a dedicated General scene golden in both
+appearances. The HUD's full-display Edge glow shader and click-through overlay
+have not yet been observed on native macOS, Linux, or Windows displays; the
+existing offscreen `rune_hud_frames` path still renders Dot scope only.
 
 Hex itself never activates on paste. Another app's modifier-tap hotkey once
 switched Spaces before the paste; the [chord breaker](#hold-and-short-taps)
