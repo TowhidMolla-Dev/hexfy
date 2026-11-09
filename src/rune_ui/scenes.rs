@@ -287,11 +287,6 @@ pub(super) const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
-    ("mac-settings-hud-visualization", |ui| {
-        *ui = mac_fixture();
-        ui.advanced = vec![Pane::General];
-        ui.settings.labs.edge_glow = true;
-    }),
     // The microphone row following a recorded voice (`--video`), and with
     // the microphone released while idle, when no audio arrives.
     ("mac-settings-mic-level", |ui| {
@@ -704,6 +699,7 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.platform.caps = platform::Capabilities::LINUX;
         ui.settings.labs.skip_pauses = true;
+        ui.settings.labs.typed_text = true;
         ui.labs_open = true;
     }),
     ("mac-production", |ui| {

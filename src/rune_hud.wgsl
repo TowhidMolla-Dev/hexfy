@@ -252,17 +252,6 @@ fn dot_value(index: i32) -> vec2f {
 fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
     let uv = in.uv;
     let position = uv * u.resolution;
-    if (u.field.w < -0.5) {
-        let edge = min(min(uv.x * u.resolution.x, (1.0 - uv.x) * u.resolution.x),
-                       min(uv.y * u.resolution.y, (1.0 - uv.y) * u.resolution.y)) / u.backing_scale;
-        let wash = exp(-edge / 37.0);
-        let rim = exp(-abs(edge - 2.0) / 4.5);
-        let phase = uv.x * 6.2831853 + uv.y * 1.7 + u.field.z * 0.72;
-        let rainbow = 0.5 + 0.5 * cos(vec3f(phase, phase - 2.0943951, phase - 4.1887902));
-        let alpha = clamp((0.21 * wash + 0.34 * rim) * (0.78 + 0.22 * u.live), 0.0, 0.55) * u.opacity;
-        let color = mix(u.base.rgb, rainbow, 0.78);
-        return for_target(vec4f(color * alpha, alpha));
-    }
     let scale = max(u.scale, 0.001) * max(u.plate_layout.z, 0.01);
     let window_point = (uv * u.resolution - u.resolution * 0.5) / u.backing_scale;
     let point = (window_point - u.plate_layout.xy) / scale;

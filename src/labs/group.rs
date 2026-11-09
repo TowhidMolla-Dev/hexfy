@@ -62,8 +62,8 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
             | Self::SettingsSearch
+            | Self::ReleaseNotesLink
             | Self::Playground => Group::Dictation,
-            Self::EdgeGlow => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols
@@ -71,8 +71,10 @@ impl Feature {
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::GnomeClipboardRestore
+            | Self::TypedText
             | Self::TerminalPaste
-            | Self::OutputFixes => Group::Output,
+            | Self::OutputFixes
+            | Self::OpenCodeInWsl => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters
@@ -90,6 +92,7 @@ impl Feature {
             Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
+            | Self::TerminalPasteShortcut
             | Self::SidedChords
             | Self::TapOrHold
             | Self::RestoreShortcutDefault
@@ -104,7 +107,8 @@ impl Feature {
             | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
-            | Self::ParakeetUltra => Group::Models,
+            | Self::ParakeetUltra
+            | Self::TranscribeFiles => Group::Models,
         }
     }
 }

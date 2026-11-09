@@ -86,6 +86,9 @@ pub(crate) enum ShortcutTarget {
     Capture,
     /// Dictate without processing.
     RawDictation,
+    /// Labs › Terminal paste shortcut: dictates like dictation and always
+    /// pastes with Ctrl+Shift+V.
+    TerminalPaste,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -316,7 +319,6 @@ fn run_runtime(
     let mut tray_view = None;
     let mut tray_meetings = None;
     indicator.set_position(settings.indicator_position);
-    indicator.set_visualization(settings.indicator_visualization);
     let mut host = WindowsDesktopHost::new(
         event_path,
         settings,
