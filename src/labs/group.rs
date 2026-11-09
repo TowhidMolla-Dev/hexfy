@@ -64,7 +64,6 @@ impl Feature {
             | Self::SettingsSearch
             | Self::ReleaseNotesLink
             | Self::Playground => Group::Dictation,
-            Self::EdgeGlow => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols

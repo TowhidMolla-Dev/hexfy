@@ -66,8 +66,6 @@ static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
-static INDICATOR_VISUALIZATION: AtomicU8 = AtomicU8::new(0);
-static EDGE_GLOW_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<AppliedHotkeys>> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
@@ -152,29 +150,6 @@ pub enum IndicatorPosition {
     Top = 0,
     Bottom = 1,
     Hidden = 2,
-}
-
-/// How the dictation indicator is drawn while recording.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[repr(u8)]
-pub enum IndicatorVisualization {
-    EdgeGlow = 0,
-    #[default]
-    Pill = 1,
-    Off = 2,
-}
-
-impl IndicatorVisualization {
-    pub const ALL: [Self; 3] = [Self::EdgeGlow, Self::Pill, Self::Off];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::EdgeGlow => "Edge glow",
-            Self::Pill => "Pill",
-            Self::Off => "Off",
-        }
-    }
 }
 
 /// Which release-service channel a direct install updates from
@@ -359,7 +334,6 @@ pub struct AppSettings {
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
-    pub indicator_visualization: IndicatorVisualization,
     pub updates: UpdateSettings,
     /// The shared vocabulary (`crate::dictation::vocabulary`). Left out of the file
     /// while empty, so settings without one stay as they were.
@@ -476,7 +450,6 @@ impl Default for AppSettings {
             mouse_shortcut_notice: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
-            indicator_visualization: IndicatorVisualization::default(),
             updates: UpdateSettings::default(),
             vocabulary: Vec::new(),
             vocabulary_boost: crate::dictation::vocabulary::VocabularyBoost::default(),
@@ -780,8 +753,6 @@ impl AppSettings {
         crate::feedback::set_sound_set(self.sound_theme);
         crate::desktop::i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
-        INDICATOR_VISUALIZATION.store(self.indicator_visualization as u8, Ordering::Release);
-        EDGE_GLOW_ENABLED.store(self.labs.edge_glow, Ordering::Release);
         #[cfg(not(target_os = "macos"))]
         crate::transcription::local_transcriber::set_device(self.transcription_device);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);
@@ -1374,18 +1345,6 @@ pub fn indicator_position() -> IndicatorPosition {
     }
 }
 
-pub fn indicator_visualization() -> IndicatorVisualization {
-    match INDICATOR_VISUALIZATION.load(Ordering::Acquire) {
-        0 => IndicatorVisualization::EdgeGlow,
-        2 => IndicatorVisualization::Off,
-        _ => IndicatorVisualization::Pill,
-    }
-}
-
-pub fn edge_glow_enabled() -> bool {
-    EDGE_GLOW_ENABLED.load(Ordering::Acquire)
-}
-
 pub fn custom_transformations_enabled() -> bool {
     CUSTOM_TRANSFORMATIONS_ENABLED.load(Ordering::Acquire)
 }
@@ -1531,22 +1490,6 @@ pub fn exists() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn indicator_visualization_defaults_to_pill_and_has_stable_values() {
-        assert_eq!(
-            AppSettings::default().indicator_visualization,
-            IndicatorVisualization::Pill
-        );
-        assert_eq!(
-            serde_json::to_value(IndicatorVisualization::EdgeGlow).unwrap(),
-            "edge_glow"
-        );
-        assert_eq!(
-            serde_json::from_value::<IndicatorVisualization>(serde_json::json!("off")).unwrap(),
-            IndicatorVisualization::Off
-        );
-    }
 
     /// GNOME's window menu and KDE's KRunner take Alt+Space, so new setups
     /// there dictate with Ctrl+Alt+Space; it shares no key with Paste last or

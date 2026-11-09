@@ -16,14 +16,13 @@ use std::sync::{Mutex, OnceLock};
 
 use rune::Availability;
 
-use crate::app_settings::{IndicatorPosition, IndicatorVisualization};
+use crate::app_settings::IndicatorPosition;
 use crate::rune_hud::{HudEvent, HudSender};
 
 /// The newest listener's generation: an older listener's reports stop counting.
 static GENERATION: Mutex<u64> = Mutex::new(0);
 /// Where the newest listener wants the HUD, for an `install` after it starts.
 static POSITION: Mutex<IndicatorPosition> = Mutex::new(IndicatorPosition::Top);
-static VISUALIZATION: Mutex<IndicatorVisualization> = Mutex::new(IndicatorVisualization::Pill);
 static HUD: OnceLock<HudSender> = OnceLock::new();
 
 /// A listener's handle on the HUD; dropping it hides what it reported.
@@ -54,15 +53,6 @@ impl LinuxIndicator {
         };
         indicator.send(HudEvent::Reset);
         indicator
-    }
-
-    pub(crate) fn set_visualization(visualization: IndicatorVisualization) {
-        *VISUALIZATION
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = visualization;
-        if let Some(sender) = HUD.get() {
-            sender.set_visualization(visualization);
-        }
     }
 
     fn sender(&self) -> Option<&'static HudSender> {
@@ -135,22 +125,6 @@ impl Drop for LinuxIndicator {
 pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let sender = crate::rune_hud::install(app);
     sender.set_position(*POSITION.lock().unwrap_or_else(|error| error.into_inner()));
-    let visualization = crate::app_settings::indicator_visualization();
-    let visualization = if visualization == IndicatorVisualization::EdgeGlow
-        && !crate::app_settings::edge_glow_enabled()
-    {
-        IndicatorVisualization::Pill
-    } else {
-        visualization
-    };
-    *VISUALIZATION
-        .lock()
-        .unwrap_or_else(|error| error.into_inner()) = visualization;
-    sender.set_visualization(
-        *VISUALIZATION
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()),
-    );
     let _ = HUD.set(sender);
 }
 

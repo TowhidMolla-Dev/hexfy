@@ -717,11 +717,6 @@ const KEYS: &[Key] = &[
         Kind::Choice(&["top", "bottom", "hidden"]),
         "Where the dictation HUD appears",
     ),
-    key(
-        "indicator_visualization",
-        Kind::Choice(&["edge_glow", "pill", "off"]),
-        "Dictation HUD visualization; Edge glow requires Labs › Edge glow",
-    ),
     optional(
         "updates.channel",
         Kind::Choice(&["stable", "dev"]),
@@ -1082,7 +1077,6 @@ pub fn apply(
         serde_json::from_value(json).map_err(|error| invalid(name, &format!("{error}")))?;
     let mut effects = Vec::new();
     let message = format!("Set {name}");
-    visualization::validate(name, &candidate)?;
     match key.key {
         "meetings.summaries"
             if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode

@@ -515,20 +515,6 @@ impl WindowsDesktopHost {
         if previous.indicator_position != current.indicator_position {
             self.indicator.set_position(current.indicator_position);
         }
-        if previous.indicator_visualization != current.indicator_visualization
-            || previous.labs.edge_glow != current.labs.edge_glow
-        {
-            self.indicator.set_visualization(
-                if current.indicator_visualization
-                    == crate::app_settings::IndicatorVisualization::EdgeGlow
-                    && !current.labs.edge_glow
-                {
-                    crate::app_settings::IndicatorVisualization::Pill
-                } else {
-                    current.indicator_visualization
-                },
-            );
-        }
         if previous.history_retention != current.history_retention
             && let Some(history) = &self.history
             && let Err(error) = history.set_retention(current.history_retention)

@@ -1766,7 +1766,7 @@ Linux beta                               // not macOS feature parity
 │           // keyless ids are removed and the dialog returns; without it they
 │           // stay; Hex is listed under Applications in System Settings ›
 │           // Shortcuts. Approving with OK was not exercised (no input there)
-├── Recording HUD -> Default Dot scope; with Labs › Edge glow, choose Edge glow / Pill / Off
+├── Recording HUD -> Dot scope, as on macOS, on the
 │   │   top or bottom edge, recording with the voice's level, then transcribing
 │   │   until accepted output finishes; Hidden position -> none   // linux.hud
 │   ├── Display -> picked at each capture start (#486)
