@@ -62,7 +62,9 @@ impl Feature {
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
             | Self::SettingsSearch
+            | Self::Appearance
             | Self::ReleaseNotesLink
+            | Self::SpeakersOnly
             | Self::Playground => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
@@ -70,11 +72,13 @@ impl Feature {
             | Self::FillerWords
             | Self::KeepOnClipboard
             | Self::CopyOnly
+            | Self::ReturnToApp
             | Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::TerminalPaste
             | Self::OutputFixes
-            | Self::OpenCodeInWsl => Group::Output,
+            | Self::OpenCodeInWsl
+            | Self::ApiProcessing => Group::Output,
             Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters
@@ -88,6 +92,7 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
             | Self::MeetingDescriptiveFilenames
+            | Self::MeetingNotesFile
             | Self::ExpireMeetingAudio => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts
@@ -95,6 +100,7 @@ impl Feature {
             | Self::TerminalPasteShortcut
             | Self::SidedChords
             | Self::TapOrHold
+            | Self::DoubleTapModifiers
             | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone

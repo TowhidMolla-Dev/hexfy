@@ -39,6 +39,9 @@ impl Feature {
                 "Leave the dictation on the clipboard after pasting instead of restoring what was there"
             }
             Self::CopyOnly => "Put the dictation on the clipboard instead of pasting it",
+            Self::ReturnToApp => {
+                "If another app comes to the front while you dictate, switch back to the app you started in before pasting"
+            }
             Self::SpokenFormatting => {
                 "Turn spoken \"new line\", \"new paragraph\", and \"open/close quote\" into line breaks and quotation marks"
             }
@@ -66,6 +69,9 @@ impl Feature {
             }
             Self::TapOrHold => {
                 "In Toggle mode, hold the shortcut to dictate until you let go; a short tap still starts and stops"
+            }
+            Self::DoubleTapModifiers => {
+                "Double-tap shortcut mode accepts any shortcut without a key, such as Option, Globe, or ⌃⌥"
             }
             Self::BenchmarkDetails => {
                 "Show each model's raw error rate, benchmark, and source in the Local transcription picker"
@@ -108,6 +114,7 @@ impl Feature {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
             }
             Self::SettingsSearch => "Find any setting in General with a search field",
+            Self::Appearance => "Use light or dark for the main window instead of the system's",
             Self::ReleaseNotesLink => {
                 "Show a link to this build's release notes in the sidebar footer"
             }
@@ -156,6 +163,9 @@ impl Feature {
             Self::MeetingDescriptiveFilenames => {
                 "Rename exported meeting Markdown to the meeting's title once notes or a rename provide one, keeping the date and time"
             }
+            Self::MeetingNotesFile => {
+                "Write the meeting's notes to their own file next to the transcript, sharing its name, with a link back to the transcript"
+            }
             Self::QuitClosesWindow => {
                 "⌘Q closes the Settings window instead of quitting Hex; dictation keeps running, and the menu bar icon still quits"
             }
@@ -170,6 +180,12 @@ impl Feature {
             }
             Self::TranscribeFiles => {
                 "Turn a WAV recording into text with hex transcribe <file> and your dictation model"
+            }
+            Self::ApiProcessing => {
+                "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
+            }
+            Self::SpeakersOnly => {
+                "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
             }
         }
     }

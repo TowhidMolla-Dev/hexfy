@@ -262,6 +262,44 @@ Checks: the `both_options_*` tests and
 `a_modifier_alone_says_linux_needs_a_key_and_suggests_one` in
 `rune_ui/tests.rs`. Constructed events only; no physical keyboard run on any OS.
 
+### Shortcuts Under Secure Input (macOS)
+
+**Added November 9, 2026:** while another app holds Secure Event Input (a
+password field, a terminal's Secure Keyboard Entry, an app that never turned it
+off), macOS stops handing key presses to Hex's event tap; modifier changes
+still arrive. Hex polls `IsSecureEventInputEnabled()` every 0.25 s and, only
+while it is on, registers the key shortcuts that start something as Carbon
+hotkeys (`suppression/secure_input.rs`). A Carbon hotkey takes its key before
+the session tap, so registering only then keeps the tap's chord rules the rest
+of the time.
+
+```ts
+Secure input turns on  // dictate.secure-input
+├── Log: "secure input is on…" with the pid and app name of the app that was
+│   in front when it turned on (kCGSSessionSecureInputPID, as `ioreg -l` shows
+│   it), which is not necessarily the one holding secure input
+├── Registered as Carbon hotkeys: Annotate, Annotate replay, Paste last,
+│   Paste meeting, and with Labs › Screenshots its two shortcuts
+│   ├── A press -> the same key down the tap would have sent (log: "shortcut
+│   │   arrived through secure input"); a release -> its key up
+│   ├── Annotate's "starts once a modifier comes up" still works: the tap
+│   │   sees the modifier change and records
+│   └── Sides can't be told apart: Right ⌥ ⇧ S also fires on Left ⌥
+├── Not registered: a binding needing Fn/Globe, mouse buttons, keyless
+│   bindings, and nothing while a shortcut is being recorded in Settings
+└── Still don't work: a dictation shortcut with a key (modifier-only ones do),
+    Dictate without processing with a key, Escape (Toggle cancel, an armed
+    Annotate press, stop drawing), and the screenshot picker's Esc and Space
+Secure input turns off -> hotkeys unregistered (a held one sends its release),
+    log: "secure input is off…"
+```
+
+Check: the tests in `suppression/secure_input.rs` (chord selection, press
+flags, missing-release bookkeeping, and Annotate's arm-then-record through
+`CaptureShortcut`). Live: a synthetic ⌥⇧F20 posted at HID while another app
+held secure input fired a Carbon press and release, and a listen-only session
+tap saw only the modifier changes. Not run with a physical keyboard press.
+
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 
@@ -425,6 +463,24 @@ Menu bar > Copy Recent Dictation (under Paste Last Dictation)  // dictate.copy-r
 │   └── One line each: whitespace collapsed, cut to 48 characters with "…"
 ├── Click one -> Its full final text on the clipboard; nothing is pasted
 └── Toggle off, History Off, or nothing to list -> Item hidden, History unread
+```
+
+Details and checks in [labs.md](labs.md).
+
+### Return to app (Labs, macOS)
+
+A dictation pastes into whichever app is frontmost when its transcript is
+ready. With Labs › Return to app on (`labs.return_to_app`, off by default):
+
+```ts
+Dictation shortcut, Caps Lock, or `hex dictation start` starts
+  -> The frontmost app's pid is recorded (never Hex's own)
+Paste job -> Carries it through inference and processing        // dictate.return-to-app
+├── Same app in front -> Paste as usual
+├── Another app in front -> Activate it, poll 10 ms up to 500 ms,
+│   settle 50 ms, then paste
+└── Gone or not confirmed -> Nothing pasted; the job fails and its text
+    becomes Paste last dictation's unless the job was cancelled
 ```
 
 Details and checks in [labs.md](labs.md).
@@ -686,6 +742,47 @@ audio/output_ducking.rs, and
 [dictation.rs](../../src/dictation.rs) (constructed audio; not run on a device
 or physical output).
 
+**Added November 9, 2026 (Labs › Only on speakers):** with the lab on
+(`labs.speakers_only`), "While dictating" applies only while the default
+output is speakers. The route is read once per recording or screen capture on
+the recording environment's worker thread (macOS) or the audio-control worker
+(Linux and Windows), and with headphones the session holds no audio effect at
+all (no mute, lower, or media pause); dictation still prevents idle sleep and
+screen captures never do. On macOS an overlapping session that shares an
+already-held effect reuses the first session's decision. Speakers and anything
+unclassified count as speakers, and with the lab off nothing changes and the
+output is never read.
+Screen-capture sessions go through the same guard: macOS's `begin_capture`
+uses the recording environment, and Linux and Windows' capture host uses the
+same audio suppressor as dictation. On macOS
+[audio/output_route.rs](../../src/audio/output_route.rs) reads the default
+output's CoreAudio transport (Bluetooth and Bluetooth LE are headphones), a
+built-in device's output-scope data source (`hdpn` when the jack is in use),
+and its UID (`BuiltInHeadphoneOutputDevice`). Linux reads `pactl
+get-default-sink` and `pactl -f json list sinks`: headphones or a headset in
+the default sink's active port (`analog-output-headphones`, `[Out] Headset`)
+or its `device.form_factor`, and a Bluetooth sink (`device.api` `bluez5`) is
+headphones unless it says speaker. Windows reads the default output's WASAPI
+form factor through cpal: headphones, headset, earpiece, and handset are
+headphones. Limits: Bluetooth speakers read as headphones on macOS and on
+Linux unless PipeWire names them speakers, an external USB headphone DAC
+reads as speakers, a Linux session with only `wpctl` and no `pactl` reads
+unknown (so "While dictating" applies), and the pre-roll still follows the
+setting rather than the route. Checks:
+`bluetooth_outputs_are_headphones`,
+`a_built_in_output_on_its_headphone_jack_is_headphones`,
+`apples_wired_headphone_device_is_headphones`,
+`everything_else_is_speakers`,
+`an_analog_sink_is_headphones_only_on_a_headphone_port`,
+`a_headset_port_is_headphones`,
+`bluetooth_sinks_are_headphones_unless_they_say_speakers`,
+`a_sink_the_sound_server_does_not_name_is_unknown`,
+`a_non_string_property_does_not_hide_the_others`, and
+`cpal_headphone_types_are_headphones` in audio/output_route.rs;
+`speakers_only_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed on a real Mac or a real Linux
+or Windows desktop with headphones.
+
 **Fixed November 2, 2026 (issue 978):** a Windows paste refused to run when
 the clipboard held only a format Hex can't snapshot (an app's private
 format), failing every dictation with "the current clipboard format cannot be
@@ -768,7 +865,11 @@ General > Shortcut mode (under Shortcut)               // dictate.shortcut-mode
   Hold or double-tap (default) -> Hold, plus double-tap to lock
   Hold                         -> Hold only
   Tap                          -> Toggle, below
-  Double-tap                   -> Double-tap only; needs a key binding
+  Double-tap                   -> Double-tap only; needs a key binding, or a
+                                  shortcut without a key (one or more
+                                  modifiers) with Labs › Double-tap on a lone
+                                  modifier (labs.double_tap_modifiers, macOS,
+                                  off by default)
 Tap
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
@@ -819,8 +920,9 @@ General > Shortcut mode                               // dictate.shortcut-explai
      right, the tape scrolling left without end and fading out at its left
      edge; opening it ends a shortcut recording and closes the model picker
   ├── The current choice has a focus-coloured border
-  ├── Double-tap with a lone modifier -> Dimmed, takes no focus or press,
-  │   says "Needs a shortcut with a key, like ⌥Space"
+  ├── Double-tap with a shortcut that has no key -> Dimmed, takes no focus
+  │   or press, says "Needs a shortcut with a key, like ⌥Space", unless
+  │   Labs › Double-tap on a lone modifier is on (macOS)
   ├── Long chord -> The panel widens (up to the window) so each option's
   │   lanes keep at least 64 pt beside the keycaps
   ├── Pick an option (click, Space) -> Saves the choice
@@ -870,7 +972,8 @@ Shortcut mode = Hold or double-tap or Double-tap     // dictate.lock
     └── Slow second release -> No lock
 
 Shortcut mode = Double-tap                           // dictate.double-tap-only
-  Requires a key binding AND locking enabled
+  Requires a key binding AND locking enabled, or a shortcut without a key
+  with Labs › Double-tap on a lone modifier on (macOS)
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
 
@@ -884,6 +987,14 @@ Checks in [suppression/tests.rs](../../src/suppression/tests.rs):
 `callback_hold_and_double_tap_boundaries_are_milliseconds`,
 `second_tap_finishes_as_press_and_hold_when_double_tap_cannot_lock`,
 `double_tap_only_waits_for_two_complete_key_chord_taps`,
+`double_tap_only_with_the_lab_starts_from_a_lone_modifier`,
+`double_tap_only_with_the_lab_still_discards_a_lone_modifier_chord`,
+`double_tap_only_with_the_lab_does_not_take_a_held_first_press_as_a_tap`,
+`double_tap_only_with_the_lab_discards_a_different_modifier_between_taps`,
+`double_tap_only_with_the_lab_locks_a_keyless_control_option_chord`,
+`double_tap_only_with_the_lab_locks_a_both_options_chord`,
+`double_tap_only_with_the_lab_discards_the_other_option_side_between_taps`,
+`without_the_lab_double_tap_only_stays_off_for_a_lone_modifier`,
 `locked_dictation_finishes_after_a_missing_key_release`.
 These cover gesture decisions, not hardware keyboard-layout or remapping equivalence.
 
@@ -1416,6 +1527,10 @@ Finish
   │       // audio_ms and vad_ms (at debug level when speech passes)
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus
+  │       // Labs › Return to app (macOS): when the app in front now isn't the
+  │       // one the capture started in, Hex activates that one and waits up to
+  │       // 500 ms for it; if it doesn't arrive, nothing is pasted and Paste
+  │       // last dictation keeps the text
   │       // the clipboard write carries nspasteboard.org Transient and
   │       // AutoGenerated markers, so conforming clipboard managers skip it
   │       // a Chromium 155/156 app in front (read from its bundle's

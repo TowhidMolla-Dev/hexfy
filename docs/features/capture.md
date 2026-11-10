@@ -238,8 +238,10 @@ Settings › Annotate                      // capture.pane
 ├── Screen Recording -> read once a second and again when the pane opens or
 │   the window becomes key, never with a prompt (capture_host::screen_access):
 │   the preflight, which keeps its first answer for the life of the process,
-│   then, while it says no, a fresh `scrawl-helper permissions` at most every
-│   2 s on its own thread and a one-frame probe once that says granted
+│   then, while it says no, a fresh `scrawl-helper permissions` on its own
+│   thread: at most every 60 s while nothing shows it, and every 2 s while
+│   its row or the capsule's permission helper is on screen, plus a one-frame
+│   probe once that says granted
 │   ├── granted -> Allowed, no button
 │   ├── granted in System Settings but unusable until Hex relaunches ->
 │   │   "Turns on when Hex restarts" and Restart Hex, never Allow over a switch
@@ -280,7 +282,10 @@ First launch with Annotate on            // capture.import
 ├── Esc while a capture records -> nothing: it reaches the app being recorded,
 │   and Hex's tap lets it through; a dictation under it goes on too (#786)
 ├── The binding is swallowed, never chord evidence for dictation
-└── Hold the dictation shortcut mid-capture -> dictation pastes as usual
+├── Hold the dictation shortcut mid-capture -> dictation pastes as usual
+└── Another app holds Secure Event Input -> ⌥⇧S still starts and stops (a
+    Carbon hotkey while it lasts; Esc doesn't arrive). See dictation.md's
+    Shortcuts Under Secure Input
 
 While a capture records                  // capture.quiet
 ├── Start -> a recording-environment session with General's While dictating
@@ -366,7 +371,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   to see your screen · Allow ✕" (Microphone, Accessibility alike)
 │   ├── Allow -> macOS's microphone prompt, else System Settings with the
 │   │   floating guide beside it (permission_guide), never at launch
-│   ├── Followed once a second (feed::watch_grant, screen_access) ->
+│   ├── Followed once a second (feed::watch_grant, screen_access_watched) ->
 │   │   "… is on · Restart Hex" when macOS needs one, then "… is on ·
 │   │   Capture ⌥⇧S"; Capture or the shortcut records the pointer's display
 │   ├── ✕ closes it; unanswered it folds after 2 min; the shortcut brings it
@@ -774,7 +779,11 @@ What a send carries                      // capture.send (router opencode::send_
 │   capture folder. The picture does not depend on the folder, so an OpenCode
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
-│   (service.json); a service that isn't up is never started
+│   (service.json); a service that isn't up is never started. On Windows with
+│   Labs › OpenCode in WSL on, a service in the default WSL distribution
+│   answers instead (capture.route). The prompt's "Recorded at" line names the
+│   capture folder as its Linux `/mnt/…` path; the summary header keeps the
+│   Windows path
 ├── With an agent host (routing's agentHost), the request body travels on SSH
 │   stdin to a Python 3 standard-library HTTP client. The contact sheet stays
 │   inline; the bundle copy follows the accepted prompt in the background
@@ -816,15 +825,19 @@ Where it goes                            // capture.route; capture.routing's aut
 │   NoAnswer | Unreachable. Background refinements preserve an open search and
 │   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   a Shift pick's): a three-second countdown begins at Written. A folder
+│   │   a Shift pick's), or a page that names its session (a
+│   │   `<meta name="opencode-session">` tag or an `.opencode-session` file in
+│   │   its folder, found through symlinked folders too), which beats any rule
+│   │   and is sent to that exact session, a subagent's included ("page names
+│   │   it"): a three-second countdown begins at Written. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
 │   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
 │   │   on it and resumes it with what it had left (at least 1 s; a hold the
 │   │   capsule never ends lapses after 2 min, and the next capture resumes
 │   │   it). Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
-│   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
-│   │   nothing else sends on its own. smartRouting off decides with the port
+│   │   autoSend, smartRouting, or jevRouting say, a saved rule or signed page
+│   │   sends and nothing else sends on its own. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
 │   ├── Guess -> everything else the router would send (Jev's pick, HOME when
 │   │   Jev couldn't tell, a dev server's port, a page's data-session or
@@ -855,9 +868,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │           ~/.local/state/opencode, or OPENCODE_PASSWORD), never the password.
 │           The capture stays saved and copied. Check: capture_host::routing
 │           a_look_that_read_no_sessions_answers_unreachable,
-│           a_failed_send_says_what_went_wrong. Known gap (#1131): Hex on
-│           Windows can't read the registration of an OpenCode running in WSL,
-│           so that setup isn't supported
+│           a_failed_send_says_what_went_wrong. On Windows with Labs ›
+│           OpenCode in WSL on, the capture router reaches the WSL service
+│           too (capture.send)
 ├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
 ├── Starting another capture preserves an older rule's accepted pending send;
