@@ -76,6 +76,14 @@ pub struct LabsSettings {
     /// The engine unloads the speech model after `unload_idle_minutes` (5, 15 default, 30, 60) unused (issue 442).
     pub unload_idle: bool,
     pub unload_idle_minutes: u32,
+    /// With Release microphone while idle on, the microphone stays open for
+    /// `keep_microphone_open_seconds` after a capture, so the next one starts
+    /// at once.
+    pub keep_microphone_open: bool,
+    /// One of [`KEEP_MICROPHONE_OPEN_SECONDS`]; another value loads the
+    /// default.
+    #[serde(deserialize_with = "deserialize_keep_microphone_open_seconds")]
+    pub keep_microphone_open_seconds: u32,
     /// Paste last dictation's row offers its default shortcut back (issue 613).
     pub restore_shortcut_default: bool,
     /// A pasted dictation stays on the clipboard, not the previous one (macOS and Windows, issue 200).
@@ -91,8 +99,11 @@ pub struct LabsSettings {
     pub filler_words: bool,
     /// `hex meetings show --srt|--vtt` exports a transcript as timed subtitles (macOS, issue 633).
     pub subtitle_export: bool,
-    /// `second_dictation_hotkey` dictates like the dictation shortcut (macOS, issue 627).
+    /// `second_dictation_hotkey` dictates like the dictation shortcut (issue 627).
     pub second_dictation_shortcut: bool,
+    /// Up to four more dictation shortcuts, each with its own activation
+    /// mode (`extra_dictation_hotkeys`, macOS).
+    pub more_dictation_shortcuts: bool,
     /// `terminal_paste_hotkey` dictates like the dictation shortcut and always pastes
     /// with Ctrl+Shift+V (Windows, Linux).
     pub terminal_paste_shortcut: bool,
@@ -116,6 +127,9 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
+    /// History selects several dictations at once, with Shift, Command (Ctrl
+    /// on Windows and Linux), or a drag, to copy or delete them together.
+    pub history_multi_select: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
     /// An automatic meeting recording stops after its call ends (macOS, issue 835).
@@ -128,7 +142,8 @@ pub struct LabsSettings {
     pub model_in_place: bool,
     /// The picker's All speech models view offers "Only downloaded models" (issue 1018).
     pub picker_downloaded: bool,
-    /// The ISO § key may be a shortcut on its own (Linux, issue 1050).
+    /// The ISO section key, left of 1, may be a shortcut on its own (Linux
+    /// and macOS, issue 1050).
     pub section_key_alone: bool,
     /// Dictations saved to History keep their audio, for Transcribe again (issue 1032).
     pub keep_recordings: bool,
@@ -195,9 +210,21 @@ pub struct LabsSettings {
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
+    /// The local API's `timestamps=segment|word` returns the speech model's
+    /// own segment and word times.
+    pub api_timestamps: bool,
     /// "While dictating" applies only while the default output is speakers;
     /// headphones are left alone.
     pub speakers_only: bool,
+    /// A dictation mode's speech model and language follow the foreground
+    /// application (macOS and Windows).
+    pub app_model_switching: bool,
+    /// The menu bar offers Pause Hex, which makes every capture shortcut
+    /// inert until Resume (macOS).
+    pub pause_menu: bool,
+    /// `hex dictation start --print` records a dictation whose transcript
+    /// goes to the command that started it, however it ends (macOS).
+    pub print_start: bool,
     /// Settings › Labs' groups opened or closed by hand, by `labs::Group`
     /// id; a group not here is open while it holds a lab that's on.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -206,6 +233,45 @@ pub struct LabsSettings {
 
 /// The idle times Labs › Unload model when idle offers, in minutes.
 pub const UNLOAD_IDLE_MINUTES: [u32; 4] = [5, 15, 30, 60];
+
+/// The times Labs › Keep mic open after dictating offers, in seconds:
+/// 30 s, 1, 3, 5, and 30 minutes.
+pub const KEEP_MICROPHONE_OPEN_SECONDS: [u32; 5] = [30, 60, 180, 300, 1_800];
+
+impl LabsSettings {
+    /// The default [`KEEP_MICROPHONE_OPEN_SECONDS`] choice.
+    pub const DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS: u32 = 60;
+
+    /// How long a capture's microphone keeps open once it ends, while Labs ›
+    /// Keep mic open after dictating is on. `None` turns it off, and
+    /// a choice outside [`KEEP_MICROPHONE_OPEN_SECONDS`] (a hand-edited file)
+    /// also reads as off rather than guessing.
+    pub fn keep_microphone_open_for(&self) -> Option<std::time::Duration> {
+        let seconds = self.keep_microphone_open_seconds;
+        (self.keep_microphone_open && KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds))
+            .then(|| std::time::Duration::from_secs(u64::from(seconds)))
+    }
+}
+
+/// A saved `keep_microphone_open_seconds` must name one of
+/// [`KEEP_MICROPHONE_OPEN_SECONDS`]; another value fails to load, so the
+/// field returns to its default with the usual launch note.
+fn deserialize_keep_microphone_open_seconds<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let seconds = u32::deserialize(deserializer)?;
+    if KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds) {
+        Ok(seconds)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "expected one of {}",
+            KEEP_MICROPHONE_OPEN_SECONDS
+                .map(|seconds| seconds.to_string())
+                .join(", ")
+        )))
+    }
+}
 
 impl Default for LabsSettings {
     fn default() -> Self {
@@ -219,6 +285,8 @@ impl Default for LabsSettings {
             mouse_shortcuts: false,
             unload_idle: false,
             unload_idle_minutes: 15,
+            keep_microphone_open: false,
+            keep_microphone_open_seconds: Self::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS,
             restore_shortcut_default: false,
             keep_on_clipboard: false,
             copy_only: false,
@@ -227,6 +295,7 @@ impl Default for LabsSettings {
             filler_words: false,
             subtitle_export: false,
             second_dictation_shortcut: false,
+            more_dictation_shortcuts: false,
             terminal_paste_shortcut: false,
             smart_spacing: false,
             spoken_symbols: false,
@@ -238,6 +307,7 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
+            history_multi_select: false,
             recent_dictations: false,
             skip_pauses: false,
             stop_when_call_ends: false,
@@ -266,7 +336,11 @@ impl Default for LabsSettings {
             opencode_in_wsl: false,
             transcribe_files: false,
             api_processing: false,
+            api_timestamps: false,
             speakers_only: false,
+            app_model_switching: false,
+            pause_menu: false,
+            print_start: false,
             gnome_meeting_capsules: false,
             gnome_annotate: false,
             screenshots: false,

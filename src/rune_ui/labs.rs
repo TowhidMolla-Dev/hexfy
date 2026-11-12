@@ -492,17 +492,26 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Changing input source selects its mapped model and language; manual choices still work"),
         ));
     }
-    // macOS's and Windows' pasters can leave a dictation on the clipboard.
+    if caps.app_model_switching {
+        rows.push(row(
+            Feature::AppModelSwitching,
+            Some(&KEYBOARD),
+            tr("Switch model with app"),
+            tr("Each mode can pick a speech model; Hex switches to it when you change apps"),
+        ));
+    }
+    // Every OS's paster can leave a dictation on the clipboard; only macOS's
+    // and Windows' can skip the paste.
+    rows.push(row(
+        Feature::KeepOnClipboard,
+        None,
+        tr("Keep dictation on clipboard"),
+        tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
+    ));
     if matches!(
         caps.os,
         super::platform::Os::Macos | super::platform::Os::Windows
     ) {
-        rows.push(row(
-            Feature::KeepOnClipboard,
-            None,
-            tr("Keep dictation on clipboard"),
-            tr("Leave the dictation on the clipboard after pasting instead of restoring what was there"),
-        ));
         rows.push(row(
             Feature::CopyOnly,
             None,
@@ -517,6 +526,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Some(&PANEL),
             tr("Return to app"),
             tr("If another app comes to the front while you dictate, Hex switches back to the app you started in before pasting. If it can't, nothing is pasted and Paste last dictation has the text."),
+        ));
+        // macOS's listener answers a printing start when its dictation ends.
+        rows.push(row(
+            Feature::PrintStart,
+            None,
+            tr("Print-only CLI dictation"),
+            tr("Let hex dictation start --print answer with the transcript when it ends"),
         ));
     }
     // macOS's shortcut machine takes a shortcut without a key.
@@ -549,11 +565,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         ));
         // macOS's listener only, so Linux renders of macOS scenes leave it out.
         if cfg!(target_os = "macos") {
+            // Up to four more, each with its own activation mode.
             rows.push(row(
-                Feature::SecondDictationShortcut,
+                Feature::MoreDictationShortcuts,
                 Some(&KEYBOARD),
-                tr("Second dictation shortcut"),
-                tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
+                tr("More dictation shortcuts"),
+                tr("Up to four more shortcuts that each dictate like the main one, each with its own mode"),
             ));
             // Reads the text before the cursor through macOS Accessibility.
             rows.push(row(
@@ -590,6 +607,14 @@ fn rows(ui: &Ui) -> Vec<Row> {
                 tr("Hide menu bar icon"),
                 tr("Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"),
             ));
+            // macOS's status item offers Pause Hex while its keyboard
+            // listener stays up.
+            rows.push(row(
+                Feature::PauseMenu,
+                None,
+                tr("Pause from menu bar"),
+                tr("Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"),
+            ));
             // macOS's app menu Quit Hex closes the window instead.
             rows.push(row(
                 Feature::QuitClosesWindow,
@@ -624,6 +649,19 @@ fn rows(ui: &Ui) -> Vec<Row> {
             }
         }
     }
+    // The ISO section key, left of 1, may be a shortcut with no modifier
+    // (Labs › Section key alone, Linux and macOS).
+    if matches!(
+        caps.os,
+        super::platform::Os::Linux | super::platform::Os::Macos
+    ) {
+        rows.push(row(
+            Feature::SectionKeyAlone,
+            Some(&KEYBOARD),
+            tr("Section key alone"),
+            tr("Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"),
+        ));
+    }
     // Linux's X11 grabs and shortcuts portal take these keys alone.
     if caps.os == super::platform::Os::Linux {
         rows.push(row(
@@ -631,12 +669,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             Some(&KEYBOARD),
             tr("Special keys alone"),
             tr("Use Menu, Pause, or Scroll Lock as a shortcut without a modifier, such as Caps Lock remapped to Menu"),
-        ));
-        rows.push(row(
-            Feature::SectionKeyAlone,
-            Some(&KEYBOARD),
-            tr("Section key alone"),
-            tr("Use the § key, left of 1 on ISO keyboards, as a shortcut without a modifier. Hex takes § from every app while it's bound"),
         ));
         // Linux's shortcut machine reads it with the listener's options.
         rows.push(row(
@@ -722,6 +754,12 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Keep the audio of dictations saved to History, so you can transcribe them again with another model"),
     ));
     rows.push(row(
+        Feature::HistoryMultiSelect,
+        None,
+        tr("Select multiple dictations"),
+        tr("Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together"),
+    ));
+    rows.push(row(
         Feature::OutputFixes,
         Some(&BOOK),
         tr("Fix results in Output"),
@@ -770,10 +808,22 @@ fn rows(ui: &Ui) -> Vec<Row> {
         tr("Apps can ask Hex's local API for transcripts with Global mode's processing applied."),
     ));
     rows.push(row(
+        Feature::ApiTimestamps,
+        None,
+        tr("Timestamps in API transcripts"),
+        tr("Apps can ask Hex's local API for each segment's or word's start and end times."),
+    ));
+    rows.push(row(
         Feature::SpeakersOnly,
         None,
         tr("Only on speakers"),
         tr("Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."),
+    ));
+    rows.push(row(
+        Feature::KeepMicrophoneOpen,
+        Some(&TIMER),
+        tr("Keep mic open after dictating"),
+        tr("With Turn off the mic when not dictating on, the microphone stays open for a while after each dictation, so the next one starts at once"),
     ));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
@@ -814,6 +864,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
             tr("Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker. Looking for it can start WSL."),
         ));
     }
+    // Another shortcut dictates exactly like the main one, on every OS (#627).
+    rows.push(row(
+        Feature::SecondDictationShortcut,
+        Some(&KEYBOARD),
+        tr("Second dictation shortcut"),
+        tr("Another shortcut that dictates like the main one, such as a key on an external keyboard"),
+    ));
     if caps.os != super::platform::Os::Macos {
         rows.push(row(
             Feature::TerminalPasteShortcut,
@@ -859,6 +916,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
+        Feature::AppModelSwitching => "lab-app-model-switching",
         Feature::MouseShortcuts => "lab-mouse-shortcuts",
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",
@@ -871,6 +929,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FillerWords => "lab-filler-words",
         Feature::SubtitleExport => "lab-subtitle-export",
         Feature::SecondDictationShortcut => "lab-second-dictation-shortcut",
+        Feature::MoreDictationShortcuts => "lab-more-dictation-shortcuts",
         Feature::TerminalPasteShortcut => "lab-terminal-paste-shortcut",
         Feature::SmartSpacing => "lab-smart-spacing",
         Feature::SpokenSymbols => "lab-spoken-symbols",
@@ -891,10 +950,12 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::PickerDownloaded => "lab-picker-downloaded",
         Feature::SectionKeyAlone => "lab-section-key",
         Feature::KeepRecordings => "lab-keep-recordings",
+        Feature::HistoryMultiSelect => "lab-history-multi-select",
         Feature::SettingsSearch => "lab-settings-search",
         Feature::Appearance => "lab-appearance",
         Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
+        Feature::PauseMenu => "lab-pause-menu",
         Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::MovableMeetingCapsules => "lab-movable-meeting-capsules",
@@ -916,7 +977,10 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::TranscribeFiles => "lab-transcribe-files",
         Feature::ApiProcessing => "lab-api-processing",
+        Feature::ApiTimestamps => "lab-api-timestamps",
         Feature::SpeakersOnly => "lab-speakers-only",
+        Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
+        Feature::PrintStart => "lab-print-start",
     }
 }
 
@@ -948,6 +1012,10 @@ fn flip(ui: &mut Ui, lab: Lab) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
+        // Its selects live only in the Modes pane, and they close with it.
+        Feature::AppModelSwitching => ui.open = None,
+        // The card's duration menu closes when its lab does.
+        Feature::KeepMicrophoneOpen => ui.open = None,
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
         // Hex hears the browser through System Audio Recording.
@@ -960,7 +1028,7 @@ fn flip(ui: &mut Ui, lab: Lab) {
 
 /// A lab's own settings, on its card while it's on: how long the model sits
 /// unused before it unloads, or the screenshot shortcut and folder.
-fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
+fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
     if !entry.on {
         return None;
     }
@@ -978,6 +1046,20 @@ fn extras(ui: &Ui, p: Paint, entry: &Row) -> Option<El> {
                         .color(p.muted()),
                 )
                 .child(unload_after(ui, p)),
+        ),
+        Lab::Feature(Feature::KeepMicrophoneOpen) => Some(
+            row()
+                .key("keep-microphone-open-row")
+                .gap(8.0)
+                .center_y()
+                .flex_wrap()
+                .child(
+                    text(tr("Keep open for"))
+                        .key("label")
+                        .font(controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(keep_microphone_open_for(ui, p, layer)),
         ),
         Lab::Feature(Feature::CapsLockDictation) => Some(
             row()
@@ -1067,4 +1149,39 @@ fn unload_after(ui: &Ui, p: Paint) -> El {
         let minutes = UNLOAD_IDLE_MINUTES[index];
         ui.update(|settings| settings.labs.unload_idle_minutes = minutes);
     })
+}
+
+/// How long the microphone stays open after a dictation before it is
+/// released. Five choices no longer fit a segmented control on a half-width
+/// card, so the choice opens in a menu.
+fn keep_microphone_open_for(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    use crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS;
+    let labels: Vec<String> = KEEP_MICROPHONE_OPEN_SECONDS
+        .iter()
+        .map(|seconds| {
+            if *seconds < 60 {
+                tr_fill("{} s", &seconds.to_string())
+            } else {
+                tr_fill("{} min", &(seconds / 60).to_string())
+            }
+        })
+        .collect();
+    let selected = KEEP_MICROPHONE_OPEN_SECONDS
+        .iter()
+        .position(|seconds| *seconds == ui.settings.labs.keep_microphone_open_seconds)
+        .unwrap_or(1);
+    super::general::quiet_select(
+        ui,
+        p,
+        super::Menu::Pick("keep-microphone-open"),
+        "keep-microphone-open-seconds".to_owned(),
+        tr("Keep open for"),
+        labels,
+        selected,
+        |ui, index| {
+            let seconds = KEEP_MICROPHONE_OPEN_SECONDS[index];
+            ui.update(|settings| settings.labs.keep_microphone_open_seconds = seconds);
+        },
+        layer,
+    )
 }

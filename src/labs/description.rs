@@ -26,11 +26,17 @@ impl Feature {
             Self::KeyboardModelSwitching => {
                 "Changing the keyboard language switches the speech model and language"
             }
+            Self::AppModelSwitching => {
+                "Each dictation mode's speech model and language follow the app in front"
+            }
             Self::MouseShortcuts => "Record mouse buttons as shortcuts",
             Self::PauseBrowser => "Also pause the browser while dictating, with Pause media",
             Self::ShareShortcut => "Let apps such as Discord see the dictation shortcut too",
             Self::UnloadIdle => {
                 "Free the speech model's memory after a while unused (labs.unload_idle_minutes); the next dictation reloads it"
+            }
+            Self::KeepMicrophoneOpen => {
+                "With Turn off the mic when not dictating on, keep the microphone open for a while after each dictation (labs.keep_microphone_open_seconds), so the next one starts at once"
             }
             Self::RestoreShortcutDefault => {
                 "Offer Restore default next to Paste last dictation's shortcut"
@@ -53,6 +59,9 @@ impl Feature {
             }
             Self::SecondDictationShortcut => {
                 "Another shortcut that dictates like the main one (second_dictation_hotkey), such as a key on an external keyboard"
+            }
+            Self::MoreDictationShortcuts => {
+                "Up to four more shortcuts that dictate like the main one, each with its own binding and activation mode (extra_dictation_hotkeys)"
             }
             Self::TerminalPasteShortcut => {
                 "Another dictation shortcut that always pastes with Ctrl+Shift+V (terminal_paste_hotkey)"
@@ -88,6 +97,9 @@ impl Feature {
             Self::HistoryStats => {
                 "Add a Stats button to History that shows a summary of your retained dictations, with hex history stats"
             }
+            Self::HistoryMultiSelect => {
+                "Shift-click, Cmd-click (Ctrl on Windows and Linux) or drag to select several dictations, then copy or delete them together"
+            }
             Self::RecentDictations => {
                 "Copy one of your last five dictations from the menu bar, under Paste Last Dictation"
             }
@@ -108,7 +120,7 @@ impl Feature {
                 "Show only downloaded speech models in the picker, with the space they take"
             }
             Self::SectionKeyAlone => {
-                "Use the § key, left of 1 on ISO keyboards, alone as a shortcut; Hex takes § from every app while it's bound"
+                "Use the key left of 1 on ISO keyboards, § or a dead key such as ^, alone as a shortcut; Hex takes it from every app while it's bound"
             }
             Self::KeepRecordings => {
                 "Keep the audio of dictations saved to History, so you can transcribe them again with another model"
@@ -184,8 +196,17 @@ impl Feature {
             Self::ApiProcessing => {
                 "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
             }
+            Self::ApiTimestamps => {
+                "Let apps using Hex's local API ask for each segment's or word's start and end times in the transcript, as the speech model heard them"
+            }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
+            }
+            Self::PauseMenu => {
+                "Add Pause Hex to the menu bar. While paused, Hex ignores its shortcuts so other apps get the keys"
+            }
+            Self::PrintStart => {
+                "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }
         }
     }

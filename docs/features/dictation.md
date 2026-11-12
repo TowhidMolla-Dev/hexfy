@@ -95,15 +95,19 @@ recorder refuses them, and a saved shortcut on one goes back to its default
 when settings load or the toggle turns off. On, the window's recorder takes
 them too (#1187). Details and checks in [labs.md](labs.md).
 
-Linux with Labs › Section key alone on (`labs.section_key_alone`, off by
-default; issue 1050): the ISO § key, left of 1, may be a shortcut with no
-modifier. The window's recorder takes § pressed alone and shows §, and
-`hex settings set dictation_hotkey §` (or `section`) saves it. It reaches X11
-grabs as keysym 0xa7 and the portal as `section`. Off, the recorder answers
-"Add a modifier" as before, `hex settings` refuses it, and a saved § shortcut
-without a modifier goes back to its default when settings load or the toggle
-turns off. While bound, § is Hex's in every app. Details and checks in
-[labs.md](labs.md).
+Linux and macOS with Labs › Section key alone on (`labs.section_key_alone`,
+off by default; issue 1050): the ISO section key, left of 1, may be a
+shortcut with no modifier. On Linux the window's recorder takes § pressed
+alone and shows §, and `hex settings set dictation_hotkey §` (or `section`)
+saves it; it reaches X11 grabs as keysym 0xa7 and the portal as `section`. On
+macOS the recorder takes key code 10 alone: AppKit gives no characters for a
+dead key, so the key is named from the active layout with the no-dead-keys
+translation and saved as its base character, `^` on a German layout
+(`{code: 10, label: "^"}`), or § where the layout types it. Off, saving the
+recording is refused and Settings shows "Add a modifier", as before;
+`hex settings` refuses it, and a saved section-key shortcut without a modifier
+goes back to its default when settings load or the toggle turns off. While
+bound, the key is Hex's in every app. Details and checks in [labs.md](labs.md).
 
 Checks: `mouse_buttons_record_with_or_without_modifiers`,
 `mouse_bindings_persist_and_conflict_only_with_the_same_trigger`,
@@ -155,6 +159,18 @@ For a shortcut that holds Fn, key code 179 is now neither a chord key nor HID
 chord evidence; any other key still is. Check:
 `globe_key_events_are_not_a_chord_with_the_function_shortcut` in
 `suppression/tests.rs` (constructed events; no physical-keyboard run).
+
+**Fixed November 11, 2026 (dead keys):** the macOS recorder named a key only
+from AppKit's `charactersIgnoringModifiers`, and a dead-key layout gives no
+character for the ISO section key (German `^`) or for `´` and `` ` `` on many
+layouts, so Option+^ answered "Unsupported key" where older builds accepted
+it. The recorder now falls back to the key's base character on the active
+layout (`keyboard::key_label`, `UCKeyTranslate` with
+`kUCKeyTranslateNoDeadKeysBit`), so it records as `^` and matches by its key
+code, and `hex settings` finds a typed `^` back to key code 10 the same way.
+The layout snapshot used for typing and Command shortcuts keeps processing
+dead keys as before. Check: `a_dead_key_records_its_layout_label` in
+`rune_ui/macos_host.rs` (macOS only; no physical German keyboard run).
 
 **Implemented November 7, 2026 (issue 37), unverified:** remapping Caps Lock to
 Control makes macOS's HID keyboard filter rewrite its usage (0x39) to Right
@@ -450,6 +466,40 @@ Checks: `terminal_paste_shortcut_owns_the_capture_it_starts` (Linux reducer),
 the Windows `a_second_dictation_shortcut_owns_the_capture_it_starts`
 (cross-compiled only). Proof limits: no physical shortcut or real terminal run
 on either OS.
+
+### Second Dictation Shortcut (Labs, every OS)
+
+Another optional dictation shortcut, for a keyboard whose main shortcut key is
+out of reach, such as a Globe/Fn key on a laptop and a spare key on an external
+keyboard. While Labs › Second dictation shortcut is on
+(`labs.second_dictation_shortcut`, off by default; issue 627), General shows
+its recorder under Shortcut, unbound until recorded and clearable:
+
+```ts
+Labs > Second dictation shortcut > recorder    // dictate.second-dictation
+├── Unbound by default -> nothing registered, grabbed, or reserved
+│   └── Record one -> registered only while the lab is on
+│       ├── macOS: its own shortcut machine beside dictation's (recognition::Hotkeys)
+│       ├── Windows: the hook's own trigger, owning its captures
+│       └── Linux: an X11 grab, or a portal entry "Second dictation shortcut"
+│           └── the desktop may grant a different key; Settings shows it
+├── Windows and Linux -> a binding needs a key; a keyless one never runs there
+├── Hold / double-tap lock / Toggle -> as the dictation shortcut
+│   ├── The shortcut that started a capture owns it: dictation, Dictate
+│   │   without processing, and Terminal paste neither finish it nor
+│   │   count toward its double tap              // DictationFlavour::Second
+│   └── Own flavour -> processed and pasted exactly like dictation
+│       (modes, History kind Dictation, last dictation updated)
+├── Clear (trash) -> unbound again; the lab off -> inactive and unregistered
+└── Paste Last and meeting paste -> only from the main shortcut
+```
+
+Checks: `second_dictation_shortcut_owns_the_capture_it_starts` (Linux reducer),
+`second_dictation_is_registered_only_while_its_lab_is_on` (Linux listener
+options), `the_second_dictation_shortcut_needs_its_lab_and_its_own_keys`
+(settings), and the Windows `the_second_dictation_flavour_owns_its_capture`
+(cross-compiled only). Proof limits: no physical shortcut press on any OS, no
+real Wayland grant or X11 grab run, and no Windows hook run.
 
 ### Copy Recent Dictation (Labs, macOS)
 
@@ -1038,8 +1088,13 @@ Release when idle -> Press shortcut                   // dictate.cold-microphone
   -> Open microphone asynchronously, no pre-roll
      ├── Release before readiness -> Discard
      ├── Stream fails before the hold threshold -> Reopen for the same press
+     ├── macOS: stream fails after the threshold -> Keep what arrived; copy,
+     │   never paste                       // recover.interrupted-dictation
      └── Ready while held or locked -> Capture
   -> Capture idle -> Microphone can close             // accepted jobs do not keep it open
+     └── Labs › Keep mic open after dictating -> Keep it open for the
+         chosen window (30 s, 1/3/5/30 min), then close; a press inside it
+         takes the warm path above with its pre-roll (labs.md)
 ```
 
 Source: `DictationCapture` in [dictation.rs](../../src/dictation.rs); checks:
@@ -1133,7 +1188,7 @@ Model advertises streaming, GPU device             // dictate.streaming
   Release -> Collect the release tail (200 ms, up to 600 ms while speech goes on)
     -> Finish with the complete clip
     -> Feed any unfed remainder
-    -> macOS Unified English: feed 400 ms of silence, as the whole clip gets
+    -> Unified English: feed 400 ms of silence, as the whole clip gets (every OS)
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
@@ -1145,7 +1200,9 @@ Model advertises streaming, GPU device             // dictate.streaming
        │   -> Transcribe the whole clip offline (source=fallback)   // language switch
        ├── No final text within 1.5 s -> Abort the stream -> Whole clip
        └── Model switched during the capture -> Stream closed -> Whole clip
-  Short tap, chord discard, microphone failure -> Drop the stream
+  Short tap, chord discard -> Drop the stream
+  Microphone stream failure -> Its audio so far becomes a copy-only dictation  // recovery.md#keep-an-interrupted-dictation
+    └── A timeline gap over 250 ms still drops the capture  // recovery.md#reopen-with-fresh-audio
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is pasted or reaches the focused app until the final text exists
   Labs + labs.live_text -> After each feed the stream publishes its text   // dictate.live-text
@@ -1452,11 +1509,15 @@ sections in each repetition. This is Metal inference evidence on an M2 Max, not
 physical capture/paste or Linux runtime proof. Chunk boundaries can still affect
 individual words; this is not a claim of perfect recognition or silence handling.
 
-The macOS `Transcriber` owns backend input padding for ordinary
-transcription. `short_unified_input_is_minimum_padded_before_trailing_context`
-in [transcription.rs](../../src/transcription.rs) checks minimum-duration padding
-followed by Unified English's additional trailing silence. This is a pure sample
-policy check, not native inference-quality proof.
+`pad_gguf_samples` in [transcription.rs](../../src/transcription.rs) owns backend
+input padding on every OS for ordinary transcription: the minimum duration,
+then Unified English's additional trailing silence. The macOS `Transcriber` and
+the Linux and Windows `LocalTranscriber::transcribe_clip` both call it; a
+non-macOS whole-clip run calls it after its pause cut.
+`short_unified_input_is_minimum_padded_before_trailing_context` in
+[transcription.rs](../../src/transcription.rs) checks minimum-duration padding
+followed by Unified English's additional trailing silence. This is a pure
+sample policy check, not native inference-quality proof.
 
 **Fixed October 31, 2026 (issue 657):** with Unified English on macOS,
 dictated sentences and questions pasted without their closing full stop or
@@ -1466,8 +1527,18 @@ trailing silence at all, and whole clips got only 200 ms. Both now get
 the stream hears it through `PauseCap` just before finalizing). Check:
 `a_dictation_stream_hears_trailing_silence_before_it_finalizes` in
 transcription/engine.rs (a fake stream). Not measured on the real model or a
-microphone; Linux and Windows streams are unchanged. Padding is now included in
-`inference_ms`; `prepare_ms` covers clip conversion and diagnostic retention.
+microphone; at the time, Linux and Windows streams were unchanged. Padding is
+now included in `inference_ms`; `prepare_ms` covers clip conversion and
+diagnostic retention.
+
+**Fixed November 10, 2026 (issue 1629):** Windows and Linux had been gated out
+of that fix. They now get the same 400 ms for Unified English on stream finish
+(`LocalTranscriber::stream_trailing_silence` through `PauseCap`) and on the
+whole clip. A whole-clip run cuts long pauses first, then pads, so a trailing
+pause cannot trim the silence. Check:
+`a_whole_clip_is_padded_after_cutting_its_trailing_pause` in
+transcription/engine.rs. Not measured on a real Windows or Linux model or
+microphone.
 
 ```ts
 Listening idle                            // dictate.model-memory
@@ -1695,7 +1766,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
         -> a new capture dismisses it; no old failure is replayed at launch
      -> Classic has none: macOS Basso, Signature's error on Windows and Linux
-     -> A lost microphone or input -> No tone; the capture ends
+     -> A lost microphone or input -> A kept clip: no tone; a shortcut or
+        `hex dictation start` capture's audio is transcribed and copied
+        instead of pasted    // recovery.md#keep-an-interrupted-dictation
+        -> No usable audio after the start, or a near-silent clip -> Error tone
   Tone requested -> Playback worker opens the default output, then plays
      -> macOS releases ~10 s after the last tone; Windows 5 min; Linux 1 s
      -> An open macOS output is a live CoreAudio client coreaudiod services
@@ -1752,6 +1826,15 @@ with a different backing scale) stayed there on every later dictation. Each
 capture's start and each hide now forget the placement, so the next show sends
 the display and rectangle again, as Linux and Windows already do. Not run on a
 two-display Mac; the misplacement inside Rune itself is not addressed here.
+
+**Fixed November 10, 2026 (issue 1663):** on Linux Wayland the HUD stopped
+appearing after its monitor was removed and added back (a KVM switch, for
+example) until Hex restarted. The compositor closes the layer surface with the
+output, and Rune hides and drops that overlay on its own while Hex still thinks
+the HUD is shown, so no later dictation asked for it again. Each capture's start
+now asks for the HUD again, so it reappears on the next dictation, on an output
+that exists. Not verified on real Wayland hardware with a monitor
+unplugged and re-plugged.
 
 ```ts
 Settings > Sounds (next to Sound volume)                    // dictate.sound-set
@@ -1995,15 +2078,35 @@ cloaked window), Rune reports why (`OverlayHandle::failure`). Hex logs the
 HUD's surface (backend, adapter, alpha mode) once, and treats a dictation
 start whose HUD presents no frame within 1.5 s as a failure too. Each
 failure is logged as an error in process.log once per reason, and Settings
-shows it as the listener's warning (`HudSender::failure`). Every OS takes dark or light and Reduce Motion
-from Rune, and loads `dot-scope.json` at launch. Windows and Linux drop the
-HUD's painter, and its buffers, bind group and pipeline, once Rune's own hold
-on the device would end: five minutes after the HUD hides on Windows, ten on
-Linux (Rune's surface idle plus the five minutes it then parks the device),
-and also when the indicator is set to Hidden while the HUD shows; macOS keeps
-it. The GPU device itself frees only once Rune's parked device also expires,
-and on Wayland layer-shell Rune keeps its own device regardless. The memory
-drop is not yet measured on a real Windows machine (#1431).
+shows it as the listener's warning (`HudSender::failure`). Each start that
+isn't Hidden opens a fresh first-frame attempt: its own present baseline and
+clock, its own one recovery hide, and no inherited no-frame decision, so a
+previous attempt's reason can stay in Settings without hiding the new one,
+and a second start while the first still runs restarts the attempt. The
+attempt hides the overlay at once (the immediate hide, not the exit fade,
+which itself needs a frame) when it presents no frame after 1.5 s; Rune's
+overlay failure is reported as the reason but never hides on its own, since a
+failed overlay presents nothing and the frame-less check covers it. That
+clears the HUD's shown state and lets Rune give its window and GPU surface
+back (Windows' zero idle parks both), so the next dictation start makes both
+again, and a lost GPU device such as a laptop resumed from standby costs one
+HUD rather than the rest of the session. Each attempt hides at most once, and
+a later frame-less start hides again. Checked by `rune_hud::tests`'
+first-frame tests (`a_frame_less_start_hides_once`,
+`a_new_start_does_not_hide_on_the_previous_reason`,
+`a_second_start_while_pending_restarts_the_attempt`,
+`an_overlay_failure_never_hides_on_its_own`, `an_attempt_hides_only_once`,
+and `the_next_start_hides_again_after_a_hide`), not on Windows hardware.
+Every OS takes dark or light and Reduce Motion from Rune, and loads
+`dot-scope.json` at launch.
+Windows and Linux drop the HUD's painter, and its buffers, bind group and
+pipeline, once Rune's own hold on the device would end: five minutes after
+the HUD hides on Windows, ten on Linux (Rune's surface idle plus the five
+minutes it then parks the device), and also when the indicator is set to
+Hidden while the HUD shows; macOS keeps it. The GPU device itself frees only
+once Rune's parked device also expires, and on Wayland layer-shell Rune keeps
+its own device regardless. The memory drop is not yet measured on a real
+Windows machine (#1431).
 
 Each chunk's meter removes the chunk's mean before measuring RMS and peak, so
 a microphone's DC offset (a Ryzen built-in digital microphone, #841) never

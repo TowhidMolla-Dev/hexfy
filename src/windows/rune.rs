@@ -94,6 +94,9 @@ pub(crate) enum ShortcutTarget {
     /// Labs › Terminal paste shortcut: dictates like dictation and always
     /// pastes with Ctrl+Shift+V.
     TerminalPaste,
+    /// Labs › Second dictation shortcut: another key that dictates exactly
+    /// like the dictation shortcut.
+    SecondDictation,
     /// Toggle mode's cancel shortcut.
     Cancel,
 }
@@ -165,6 +168,9 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
+    if let Err(error) = crate::windows::login_item::follow_current_version() {
+        tracing::warn!(%error, "could not point Launch at login at this version of Hex");
+    }
     let Some(instance) = crate::windows::app::AppInstance::claim(start_hidden)? else {
         return Ok(());
     };
@@ -182,6 +188,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     crate::windows::gpu_fallback::watch();
     let mut app = crate::rune_ui::app(Default::default())
         .args(crate::rune_ui::window_args())
+        .on_quit(quit_hook)
         .on_window(|window| {
             WINDOW.with(|current| *current.borrow_mut() = Some(window.clone()));
             let _ = window.with_raw_handle(|handle| {
@@ -302,6 +309,16 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     drop(local_api);
     drop(tray);
     Ok(())
+}
+
+/// Hex is ending: Rune runs this before the loop ends, including from Windows'
+/// `WM_QUERYENDSESSION` and `WM_ENDSESSION` (also for a windowless launch),
+/// which may end the process before `app.run()` returns. Clear the GPU draw
+/// marker now, so a logoff or shutdown isn't read as a crash while drawing.
+/// If another app vetoes the shutdown, the marker is already gone and this
+/// launch carries on without it.
+fn quit_hook(_: &mut Ui, _: &mut rune::Tx) {
+    crate::windows::gpu_fallback::disarm();
 }
 
 /// Names the main thread, which runs Rune's event loop and draws, so

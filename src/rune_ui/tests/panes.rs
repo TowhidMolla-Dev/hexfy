@@ -401,7 +401,7 @@ fn the_browser_labs_toggle_turns_on_and_asks_for_system_audio() {
 
 #[test]
 fn contributed_options_are_labs_toggles_off_by_default() {
-    let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
+    let mut rt = runtime("mac-settings", true, (980.0, 2400.0));
     open_labs(&mut rt);
     for row in [
         "lab-mouse-shortcuts",
@@ -409,6 +409,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-keep-on-clipboard",
         "lab-copy-only",
         "lab-return-to-app",
+        "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-spoken-symbols",
@@ -438,6 +439,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.return_to_app);
     tap(&mut rt, "lab-return-to-app");
     assert!(rt.state.settings.labs.return_to_app);
+    assert!(!rt.state.settings.labs.print_start);
+    tap(&mut rt, "lab-print-start");
+    assert!(rt.state.settings.labs.print_start);
     assert!(!rt.state.settings.labs.caps_lock_dictation);
     tap(&mut rt, "lab-caps-lock-dictation");
     assert!(rt.state.settings.labs.caps_lock_dictation);
@@ -449,10 +453,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("share-dictation-shortcut").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
-    assert!(
-        rt.find("lab-keep-on-clipboard").is_some(),
-        "macOS and Windows"
-    );
+    assert!(rt.find("lab-keep-on-clipboard").is_some(), "every OS");
     assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
@@ -466,6 +467,16 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.share_dictation_shortcut);
     tap(&mut rt, "lab-share-shortcut");
     assert!(rt.state.settings.share_dictation_shortcut);
+
+    // Linux's paster keeps the dictation on the clipboard too; only macOS
+    // and Windows can skip the paste.
+    let mut rt = runtime("linux-labs", true, (980.0, 4000.0));
+    unfold_labs(&mut rt);
+    assert!(rt.find("lab-keep-on-clipboard").is_some(), "every OS");
+    assert!(rt.find("lab-copy-only").is_none(), "macOS and Windows only");
+    assert!(!rt.state.settings.labs.keep_on_clipboard);
+    tap(&mut rt, "lab-keep-on-clipboard");
+    assert!(rt.state.settings.labs.keep_on_clipboard);
 }
 
 /// Summaries is one choice in Meetings › Settings › After a meeting: Off,
@@ -1352,10 +1363,7 @@ fn meetings_settings_save_and_ask_for_system_audio() {
         Some(MeetingPolicy::AlwaysRecord)
     );
     pick(&mut rt, "call8-policy", 0);
-    assert_eq!(
-        policy(&rt, "problems.kitlangton.com"),
-        Some(MeetingPolicy::Ask)
-    );
+    assert_eq!(policy(&rt, "example.com"), Some(MeetingPolicy::Ask));
     assert!(rt.find("call8").is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
@@ -1566,7 +1574,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Markdown(
-                "/Users/kit/Documents/Hex Meetings/Arcade launch plan.md".into()
+                "~/Documents/Hex Meetings/Arcade launch plan.md".into()
             )
         ))]
     );
@@ -1579,7 +1587,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Folder(
-                "/Users/kit/Library/Application Support/hex/meetings/preview-notes".into()
+                "~/Library/Application Support/hex/meetings/preview-notes".into()
             )
         ))]
     );
@@ -1601,7 +1609,7 @@ fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording
         asked(&rt),
         [PlatformRequest::Meeting(MeetingRequest::Reveal(
             crate::meeting::RevealTarget::Folder(
-                "/Users/kit/Library/Application Support/hex/meetings/preview-design".into()
+                "~/Library/Application Support/hex/meetings/preview-design".into()
             )
         ))]
     );
@@ -2064,6 +2072,10 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-return-to-app", settings.labs.return_to_app),
         ("lab-speakers-only", settings.labs.speakers_only),
+        (
+            "lab-second-dictation-shortcut",
+            settings.labs.second_dictation_shortcut,
+        ),
     ] {
         assert!(rt.find(row).is_some(), "Labs lacks {row}");
         assert!(!on, "{row} is on");
@@ -2089,11 +2101,23 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(rt.find("terminal-paste").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
+    assert!(
+        rt.find("lab-second-dictation-shortcut").is_some(),
+        "the second dictation shortcut runs on Windows too"
+    );
     tap(&mut rt, "lab-terminal-paste");
     assert!(rt.state.settings.paste_with_shift);
     assert!(
         rt.find("lab-meetings").is_some(),
         "Meetings runs on Windows too"
+    );
+
+    // Linux lists the second dictation shortcut as well.
+    let mut rt = runtime("linux-labs", true, (980.0, 2000.0));
+    unfold_labs(&mut rt);
+    assert!(
+        rt.find("lab-second-dictation-shortcut").is_some(),
+        "the second dictation shortcut runs on Linux too"
     );
 }
 
@@ -2197,6 +2221,44 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
     tap(&mut rt, "lab-unload-idle");
     assert!(rt.state.settings.labs.unload_idle);
     assert!(rt.find("unload-idle-minutes").is_some());
+}
+
+#[test]
+fn keep_microphone_open_shows_its_window_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::KeepMicrophoneOpen.group()));
+    settle(&mut rt);
+    assert!(
+        rt.find("keep-microphone-open-seconds-trigger").is_none(),
+        "hidden while off"
+    );
+    tap(&mut rt, "lab-keep-microphone-open");
+    assert!(rt.state.settings.labs.keep_microphone_open);
+    let (control, _) = rt
+        .presented("keep-microphone-open-seconds-trigger")
+        .expect("the window's control");
+    let (card, _) = rt
+        .presented("lab-card-keep-microphone-open")
+        .expect("its card");
+    assert!(
+        control[0] + control[2] <= card[0] + card[2],
+        "the window's control stays inside its card"
+    );
+    assert_eq!(
+        rt.state.settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
+    );
+    // The last choice is reachable from the menu.
+    tap(&mut rt, "keep-microphone-open-seconds-trigger");
+    tap(&mut rt, "option4");
+    assert_eq!(
+        rt.state.settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS[4]
+    );
+    tap(&mut rt, "lab-keep-microphone-open");
+    assert!(!rt.state.settings.labs.keep_microphone_open);
+    assert!(rt.find("keep-microphone-open-seconds-trigger").is_none());
 }
 
 #[test]
@@ -2391,6 +2453,28 @@ fn labs_groups_fold_and_remember_it() {
     assert_eq!(rt.state.settings.labs.groups.get("models"), Some(&true));
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn a_saved_record_shortcut_shows_and_clears_while_annotate_is_off() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| {
+        ui.settings.labs.screenshots = true;
+        ui.settings.capture.enabled = false;
+        ui.settings.screenshots.record_hotkey =
+            Some(crate::app_settings::HotkeyBinding::screenshot_default());
+        ui.lab_store.group = Some(crate::labs::Feature::Screenshots.group());
+    });
+    settle(&mut rt);
+    assert!(rt.find("needs-annotate").is_some());
+    assert!(
+        rt.find("clear-screenshot-record-shortcut").is_some(),
+        "the key it holds stays visible and can be freed"
+    );
+    tap(&mut rt, "clear-screenshot-record-shortcut");
+    assert_eq!(rt.state.settings.screenshots.record_hotkey, None);
+    assert!(rt.find("clear-screenshot-record-shortcut").is_none());
+}
+
 /// Each OS shows only its labs, and a group with none of them hides.
 #[test]
 fn labs_groups_follow_each_os() {
@@ -2400,16 +2484,23 @@ fn labs_groups_follow_each_os() {
             .filter_map(|e| e.key?.strip_prefix("lab-card-").map(str::to_string))
             .collect()
     };
-    for (scene, has, lacks) in [
-        ("windows-labs", "terminal-paste", "mouse-shortcuts"),
-        ("linux-labs", "section-key", "terminal-paste"),
-        ("mac-labs", "mouse-shortcuts", "section-key"),
-    ] {
+    let cases: [(&str, &[&str], &str); 3] = [
+        ("windows-labs", &["terminal-paste"], "mouse-shortcuts"),
+        ("linux-labs", &["section-key"], "terminal-paste"),
+        (
+            "mac-labs",
+            &["section-key", "mouse-shortcuts"],
+            "terminal-paste",
+        ),
+    ];
+    for (scene, shows, hides) in cases {
         let mut rt = runtime(scene, true, (980.0, 4000.0));
         unfold_labs(&mut rt);
         let shown = cards(&rt);
-        assert!(shown.contains(&has.to_string()), "{scene} shows {has}");
-        assert!(!shown.contains(&lacks.to_string()), "{scene} hides {lacks}");
+        for id in shows {
+            assert!(shown.contains(&id.to_string()), "{scene} shows {id}");
+        }
+        assert!(!shown.contains(&hides.to_string()), "{scene} hides {hides}");
         for group in crate::labs::Group::ALL {
             let any = shown.iter().any(|id| {
                 crate::labs::Feature::from_name(id)

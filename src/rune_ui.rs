@@ -66,6 +66,7 @@ mod sidebar;
 mod sidebar_update;
 mod sound_sets;
 mod spark;
+mod speech_model;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
 mod vocabulary;
@@ -361,6 +362,11 @@ fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> run
 fn on_close(ui: &mut Ui, tx: &mut Tx) {
     ui.flush_drafts();
     settings::cancel_capture(ui);
+    // A hidden window only polls when woken, so poll's visibility check
+    // cannot stop a playback that was running when it closed.
+    if let Some(playback) = &mut ui.history.playback {
+        playback.stop();
+    }
     ui.open = None;
     models::close(ui);
     ui.close_dialogs();
@@ -586,6 +592,10 @@ enum Menu {
     InputSourceModel(usize),
     /// An input source's language in keyboard model switching.
     InputSourceLanguage(usize),
+    /// A mode's speech model in the Modes pane (Labs › Switch model with app).
+    ModeSpeechModel(modes::Selection),
+    /// A mode's speech language in the Modes pane.
+    ModeSpeechLanguage(modes::Selection),
     /// How long History keeps dictations.
     HistoryRetention,
     /// The installed models History's Transcribe again offers.
@@ -1185,7 +1195,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         ui.meetings.delete_armed = None;
         true
     } else {
-        false
+        ui.pane == Pane::History && ui.history.cancel_delete()
     }
 }
 
@@ -1254,7 +1264,14 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && (ui.pane == Pane::Modes || platform_settings::summary_model_shown(ui))
             && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible),
     );
-    changed |= ui.history.poll(ui.pane == Pane::History);
+    let history_multi = history::multi(ui);
+    changed |= ui.history.poll(
+        ui.pane == Pane::History
+            && !ui.labs_open
+            && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
+        ui.settings.labs.keep_recordings,
+        history_multi,
+    );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
     if ui.pane == Pane::Output && !ui.labs_open {
@@ -1374,7 +1391,7 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
-        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p)),
+        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p, &mut layer)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
@@ -1492,6 +1509,9 @@ mod snap_isolation;
 
 #[cfg(test)]
 mod keyboard_model_tests;
+
+#[cfg(test)]
+mod speech_model_tests;
 
 #[cfg(test)]
 mod dmg_keycap;

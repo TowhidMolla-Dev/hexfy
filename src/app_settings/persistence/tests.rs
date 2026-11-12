@@ -2,6 +2,8 @@ use super::*;
 use crate::app_settings::{
     MeetingRetention, MeetingSettings, MeetingSummaries, RecordingAudioBehavior,
 };
+use crate::dictation::vocabulary::VocabularyEntry;
+use crate::transcription::models::{TranscriptionModelId, TranscriptionSelection};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::atomic::Ordering;
@@ -52,6 +54,15 @@ fn launch_note(path: &Path) -> Option<String> {
     }
 }
 
+/// `load_for_launch` publishes process-global runtime state; restore the defaults afterwards.
+struct RestoredRuntime;
+
+impl Drop for RestoredRuntime {
+    fn drop(&mut self) {
+        AppSettings::default().apply_runtime();
+    }
+}
+
 #[test]
 fn unset_retention_saves_a_shape_older_hex_can_read() {
     // The meeting field in 46c3c762 was non-optional, defaulting to Forever.
@@ -88,6 +99,79 @@ fn unset_retention_saves_a_shape_older_hex_can_read() {
 }
 
 #[test]
+fn saved_keys_are_sorted_at_every_level() {
+    let file = SettingsFile::new(b"{}");
+    let settings = AppSettings {
+        sound_effect_volume: 0.37,
+        vocabulary: vec![VocabularyEntry {
+            term: "Cappuccino".into(),
+            sounds_like: vec!["capuchin".into()],
+        }],
+        ..AppSettings::default()
+    };
+    settings.write_to(&file.path).unwrap();
+    let raw = fs::read_to_string(&file.path).unwrap();
+    let keys = assert_sorted_keys(&raw);
+    assert!(keys > 40, "only {keys} keys checked");
+    // f32 settings keep their short form instead of widening through `Value`.
+    for (key, value) in [
+        ("sound_effect_volume", "0.37"),
+        ("recording_duck_volume", "0.2"),
+        ("hex_microphone_strength", "1.0"),
+    ] {
+        let line = format!("\"{key}\": {value}");
+        assert!(
+            raw.lines()
+                .any(|written| written.trim().trim_end_matches(',') == line),
+            "settings.json has no `{line}`"
+        );
+    }
+    let saved: Value = serde_json::from_str(&raw).unwrap();
+    // These sections have several keys each, and the vocabulary entry is an
+    // object inside an array, so nested objects are covered.
+    assert!(saved["meetings"].as_object().unwrap().len() > 1);
+    assert!(saved["transcription"].as_object().unwrap().len() > 1);
+    assert_eq!(saved["vocabulary"][0]["sounds_like"], json!(["capuchin"]));
+    assert_eq!(AppSettings::load_from(&file.path).unwrap(), settings);
+}
+
+/// Asserts that every object in the pretty-printed JSON `raw` has ascending
+/// keys, including the objects inside arrays, and returns the number of keys it
+/// checked. `Value` sorts keys as it parses, so this reads the file's own text:
+/// serde_json gives every key its own line, indented two spaces per level.
+fn assert_sorted_keys(raw: &str) -> usize {
+    /// The key of a line that starts a member (`"key": ...`).
+    fn key_at(line: &str) -> Option<&str> {
+        let rest = line.strip_prefix('"')?;
+        let key = &rest[..rest.find('"')?];
+        rest[key.len() + 1..].starts_with(':').then_some(key)
+    }
+    // Each open object by the indentation of its keys, with the last key seen.
+    let mut open: Vec<(usize, &str)> = Vec::new();
+    let mut checked = 0;
+    for line in raw.lines() {
+        let indent = line.len() - line.trim_start().len();
+        open.retain(|(key_indent, _)| *key_indent <= indent);
+        let Some(key) = key_at(line.trim_start()) else {
+            continue;
+        };
+        checked += 1;
+        match open.last_mut() {
+            Some((key_indent, previous)) if *key_indent == indent => {
+                assert!(
+                    *previous < key,
+                    "settings.json writes \"{key}\" after \"{previous}\" at nesting level {}",
+                    indent / 2
+                );
+                *previous = key;
+            }
+            _ => open.push((indent, key)),
+        }
+    }
+    checked
+}
+
+#[test]
 fn invalid_enum_resets_only_that_field_and_leaves_disk_alone() {
     let original = br#"{"recording_audio_behavior":"future-mode","sound_effect_volume":0.37,"meetings":{"enabled":true}}"#;
     let file = SettingsFile::new(original);
@@ -115,6 +199,39 @@ fn an_invalid_appearance_theme_resets_only_that_field() {
     assert!(settings.labs.live_text);
     assert_eq!(fs::read(&file.path).unwrap(), original);
     assert!(file.backups().is_empty());
+}
+
+#[test]
+fn a_microphone_linger_window_outside_the_choices_loads_the_default() {
+    let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":45,"live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(
+        settings.labs.keep_microphone_open,
+        "the switch stays as saved"
+    );
+    assert_eq!(
+        settings.labs.keep_microphone_open_seconds,
+        crate::app_settings::LabsSettings::DEFAULT_KEEP_MICROPHONE_OPEN_SECONDS
+    );
+    assert_eq!(
+        settings.labs.keep_microphone_open_for(),
+        Some(std::time::Duration::from_secs(60))
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn a_microphone_linger_window_from_the_choices_keeps_its_seconds() {
+    let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":180}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert_eq!(
+        settings.labs.keep_microphone_open_for(),
+        Some(std::time::Duration::from_secs(180))
+    );
 }
 
 #[test]
@@ -339,6 +456,32 @@ fn a_broken_settings_file_is_named_at_launch_with_its_parse_error() {
 
     let file = SettingsFile::new(b"{}");
     assert!(launch_note(&file.path).is_none());
+}
+
+#[test]
+fn launch_publishes_the_saved_selection_before_the_worker_starts() {
+    let _restore = RestoredRuntime;
+    let file = SettingsFile::new(b"{}");
+    let saved = TranscriptionSelection {
+        model: TranscriptionModelId::WhisperLargeV3Turbo,
+        language: "fr".into(),
+    };
+    AppSettings {
+        transcription: saved.clone(),
+        ..AppSettings::default()
+    }
+    .write_to(&file.path)
+    .unwrap();
+
+    AppSettings::load_for_launch_at(Ok(file.path.clone()));
+    assert_eq!(crate::app_settings::transcription_selection().1, saved);
+
+    // The defaults fallback publishes too, so a launch that can't read settings starts from defaults.
+    AppSettings::load_for_launch_at(Err(eyre!("settings path unavailable")));
+    assert_eq!(
+        crate::app_settings::transcription_selection().1,
+        TranscriptionSelection::default()
+    );
 }
 
 #[test]

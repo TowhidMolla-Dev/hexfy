@@ -223,6 +223,8 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   "Without Hex" (typed, with typos) -> "With Hex" (the same reply, spoken,
 │   fireworks lighting the page), then moves on by itself; Skip → (or
 │   Escape) cuts to the end
+│   └── Jay's face rides the newest message: it fades out on the older line as
+│       it fades in on the new one, never popping off in one frame
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
 │   └── Permissions are read again at launch: a setup they now finish (macOS's
 │       Quit & Reopen after a grant) is passed; past setup, it waits until they do
@@ -256,6 +258,9 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   -> "Getting Hex ready to listen…" in place of the hold prompt until its
 │   │   first session starts (desktop/host.rs `warming`)
 │   │   // setup.warming; Check: `the_practice_page_waits_for_the_listener`
+│   ├── macOS, mic kept open (General's "Turn off the mic when not dictating"
+│   │   off when the run opened) -> a note at the window's foot, here and on
+│   │   Hex is ready, says why macOS shows the mic in use  // setup.mic-note
 │   └── Done at any time -> Hex is ready  // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused
 │   ├── First time -> Hex records a marker, reopens itself, resumes at the practice
@@ -658,6 +663,80 @@ reported `us`, then `ru` after an XKB group lock. The Windows observer and both
 new runtime paths compile (x64 clippy) but were not run on Windows or a live X11
 desktop.
 
+### Switch models with the app in front
+
+```ts
+Labs > Switch model with app                      // labs.app_model_switching; macOS, Windows; off by default; Modes shows each mode's choice while on
+├── Each mode, Global included -> Don't switch, or an installed model and a language
+│   ├── New choice -> The model's last-used language, else the saved language it supports
+│   ├── One-language model -> Its language shown fixed
+│   └── No choice -> Leave the selected model alone
+├── Matching -> By application on macOS and Windows alike; a mode's website rules are ignored
+├── Frontmost app changes -> The matching mode's speech choice
+│   ├── 300 ms after the last change -> Existing installed-only picker preparation
+│   ├── Same model and language already selected -> Nothing loads
+│   └── A model no longer downloaded -> Not installed; the preparation refuses it
+├── Hex's own window, or no app in front -> Ignored; keep the last mode and its pending switch
+├── Enable -> Wait for the next app other than Hex; launch records the app in front without switching
+├── Editing a mode's choice -> Applies when you next focus an app whose mode carries it, never while Hex is in front
+├── Manual model choice -> Supersede pending automatic work; do not reapply at recording start
+├── A dictation records or transcribes -> Hold a due switch until idle   // macOS from its press; Windows engine streams and finishes
+├── Both keyboard and app switching on -> Whichever switch is due later wins; the app wins a tie
+├── Disable -> Cancel automatic work; stop observing; leave the selected model alone
+└── Linux -> Not listed; no runtime follows the frontmost app for models
+```
+
+Each mode's choice persists as `speech` in `dictation_processing.modes[]`,
+and Global's in `dictation_processing.default_mode.speech`, storing a model
+with a language it supports. Only downloaded GGUF models from the picker are
+offered (Apple Speech never); downloads stay in the picker, and a switch never
+downloads. A choice whose model is no longer downloaded reads Not installed
+and is refused by preparation, which leaves the selected model alone.
+Editing a mode's choice, Global's included, applies when you next focus an
+app whose mode carries it; it never applies while Hex's own window is in
+front. Enabling the lab switches nothing by itself: the choice applies when
+you next focus an app other than Hex, after the same 300 ms debounce.
+
+The switch follows the same policy as keyboard-language switching
+([app_model_switching.rs](../../src/transcription/app_model_switching.rs)):
+a manual choice cancels a pending automatic switch, launching records the mode
+in front without applying it, and a due switch waits while a dictation
+records or transcribes (macOS knows a capture from its press; Windows sees the
+engine's streams and finishes). A mode without a choice switches nothing, and
+turning the lab off stops observing the frontmost app. Both hosts match by
+application only: macOS matches the foreground application through the same
+dictation profile selectors as mode processing, and Windows matches the
+foreground executable stem through `dictation::modes`; neither reads a
+browser page, so a mode's website rules are ignored and a mode chosen only by
+website never matches. Hex's own window, and a moment with no application in
+front, are ignored entirely: they neither schedule nor cancel a switch.
+Linux has no runtime for it, so the lab is not listed there.
+
+The switch is debounced for 300 ms after the app changes. With keyboard
+switching also on, both sources follow the same picker preparation: the one
+that becomes due later wins, and if both are due in the same tick the app
+switch wins.
+
+Sources: [switch policy](../../src/transcription/app_model_switching.rs),
+[macOS runtime](../../src/macos_rune/runtime.rs),
+[Windows host](../../src/windows/app.rs),
+[Modes pane](../../src/rune_ui/modes.rs), and the shared
+[row](../../src/rune_ui/speech_model.rs) it uses with General's input-source
+mappings. Checks:
+`app_model_switching_is_a_labs_toggle_on_macos_and_windows`,
+`a_mode_picks_an_installed_speech_model_and_language`, and
+`the_speech_row_needs_the_lab_and_a_capable_os` in
+[speech_model_tests.rs](../../src/rune_ui/speech_model_tests.rs); the policy
+tests in [app_model_switching.rs](../../src/transcription/app_model_switching.rs);
+the settings round-trip and validation tests in
+[app_settings.rs](../../src/app_settings.rs); and the selector tests in
+[dictation/config.rs](../../src/dictation/config.rs) and
+[dictation/modes.rs](../../src/dictation/modes.rs). No check delivers a
+foreground app change on a live Mac or Windows PC, and the runtime scheduling
+compiles there only; the `mac-labs` and `windows-labs` goldens were regenerated
+for the new card, the Modes goldens are unchanged with the lab off, and the new
+`modes-speech` golden shows the on state.
+
 ### Delete downloaded models
 
 ```ts
@@ -706,10 +785,20 @@ General > Shortcut mode -> Hold or double-tap (default), Hold, Tap, Double-tap
      more modifiers) it says so, unless Labs > Double-tap on a lone modifier
      is on (macOS)
 
-Labs > Second dictation shortcut (macOS, off)   // labs.md; issue 627
+Labs > Second dictation shortcut (off)   // labs.md; issue 627
   -> General shows "Second dictation shortcut" under Shortcut (unbound, clearable)
   -> it dictates like the shortcut: Hold/Toggle, double-tap lock, release
   -> the shortcut that starts a capture finishes it; the other stands down meanwhile
+  -> Linux: an X11 grab or the shortcuts portal's "Second dictation shortcut"
+     entry while on and bound; needs a key, as every Linux shortcut does
+  -> Windows: the hook's second trigger, with the same rules; needs a key
+     (Windows registers none without one)
+
+Labs > More dictation shortcuts (macOS, off)   // labs.md
+  -> General shows a numbered row per extra (recorder, shortcut mode, Remove) and Add shortcut under four
+  -> each row dictates like the shortcut in its own mode; Double-tap also takes a lone modifier while Labs > Double-tap on a lone modifier is on
+  -> Escape cancels once it's locked, in Tap, or on a bare key or mouse button
+  -> off, the saved rows stay and nothing matches; on, each needs its own keys
 
 Labs > Terminal paste shortcut (Windows, Linux; off)   // labs.md
   -> General shows "Terminal paste shortcut" under Shortcut (unbound, clearable)
@@ -744,7 +833,7 @@ Completed output                         // output
 ├── Paste -> Current focus, in submission order
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
-│   ├── Labs > Keep dictation on clipboard (macOS, Windows, off) -> the dictation stays on the clipboard (labs.md)
+│   ├── Labs > Keep dictation on clipboard (every OS, off) -> the dictation stays on the clipboard (labs.md)
 │   │   └── Windows -> kept as an ordinary entry, in history too
 │   └── Labs > Copy dictation only (macOS, Windows, off) -> clipboard only: no paste, typing, or restore (labs.md)
 ├── Paste Last Dictation                  // menu or Option-Shift-V / saved binding
@@ -752,10 +841,15 @@ Completed output                         // output
 │   └── macOS menu item shows the saved binding (⌥⇧V by default); unbound,
 │       modifier-only, or a mouse button -> no shortcut shown
 └── History
-    ├── Inspect / search / copy (row hover or the card) / delete
+    ├── Inspect / search / copy (row hover or the card) / Delete… (asks once)
     ├── Retention ("Kept 7 days ▾" menu) -> Seven days by default, always hard-capped
     ├── Off ("History off") -> Stop new entries; preserve existing entries
     ├── Same menu > Clear all history… -> asks in the header; only the red confirm clears
+    ├── Labs > Select multiple dictations (off, every OS) -> one row as before   // labs.history_multi_select
+    │   ├── Plain click, Shift-click on the visible (searched) rows, Cmd-click (Ctrl), or a drag -> one, a range, or a toggled set
+    │   ├── Two or more selected -> "{count} dictations selected": Copy (final texts, oldest first, a blank line between each) / Delete… (asks once)
+    │   ├── One selected -> the ordinary card, Copy, Delete… (asks once, then Cancel), Transcribe again with Keep recordings
+    │   └── A search, new entries, or a delete prune it; turning the lab off keeps one entry (labs.md)
     └── Labs > Keep recordings (off) -> new entries keep their 16 kHz audio   // labs.keep-recordings
         -> also "Keep audio too" in the retention menu while the lab is offered
         -> the card's "Transcribe again" menu runs it through any installed model
@@ -1179,6 +1273,11 @@ Selected mode                            // replaces Global's rewrite and transf
 Stage fails -> Preserve its input        // failed chain discards partial results
 ```
 
+With Labs › Switch model with app on, each mode also carries a speech model
+and language (`speech`) and the frontmost app's mode switches the
+transcription model before the next dictation; see
+[Switch models with the app in front](#switch-models-with-the-app-in-front).
+
 **Fixed November 1, 2026 (issue 949):** every OpenCode rewrite's fixed
 instructions (`PROTOCOL_PROMPT`) now say to keep every number as said (no
 dropped, merged, or reformatted numbers, no added thousands separators) and,
@@ -1407,6 +1506,10 @@ Menu bar and Settings                    // maintenance
 ├── Menu (macOS), top to bottom: now, things to do, the app
 │   ├── Meetings on or a meeting under way: Recording · <title> · 12:34 (opens
 │   │   the Meetings pane), Stop & Transcribe, Copy Section ▸; idle: Record Meeting
+│   ├── Pause Hex (Labs › Pause from menu bar, off, #82) -> every capture
+│   │   shortcut and the secure-input hotkeys go inert, the tap passes keys
+│   │   through, and the row reads Resume Hex (labs.md); Resume waits for a
+│   │   neutral keyboard, and a restart starts unpaused
 │   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
 │   │   Copy Last Meeting Transcript (Meetings on), Restore Last Capture (Labs ›
 │   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸
@@ -1416,7 +1519,8 @@ Menu bar and Settings                    // maintenance
 │   ├── No Meetings… (Settings… opens the same window) and no Show Hex in
 │   │   Screen Recordings (Annotate's pane has it)
 │   └── check: the_menu_reads_meeting_then_actions_then_the_app,
-│       paste_last_shows_the_saved_binding_or_nothing (status_item.rs; the
+│       paste_last_shows_the_saved_binding_or_nothing,
+│       the_pause_row_reads_pause_or_resume (status_item.rs; the
 │       row order and key equivalents only, no native menu is drawn)
 ├── Icon -> 18 pt monochrome Hex mark template (recording variant + elapsed time)
 │   └── Labs > Hide menu bar icon (off, #1064) -> hidden unless a meeting is under
@@ -1831,14 +1935,23 @@ Linux beta                               // not macOS feature parity
 │       │   -> process.log warns once; `hex status` reports `hud_limitation`
 │       │   and the listener's notice or warning (a missing wl-copy outranks it)
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, desktop/tray_icon, rune::Tray)
-│   ├── Mark -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
-│   │   ├── Read when the tray is created; a later switch applies at the next launch
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu as Windows' (tray_menu, linux/tray, linux/icons, desktop/tray_icon, rune::Tray)
+│   ├── Symbolic theme icon -> `anomaly.hex-symbolic.svg` written to hicolor/scalable/apps at startup, its name served beside the pixmap
+│   │   ├── Plasma 6, GNOME's AppIndicator extension, Waybar -> draw the mark in the panel's text color
+│   │   │   // check: the_tray_icon_is_a_recolorable_symbolic_svg,
+│   │   │   // the_tray_icon_lands_in_the_users_scalable_hicolor_theme,
+│   │   │   // a_dangling_tray_icon_link_is_not_in_place
+│   │   │   // not checked against a real KDE or GNOME panel
+│   │   ├── Plasma 6 -> recolors only with icon themes that follow the color scheme (Breeze, Papirus); else the SVG's default color
+│   │   ├── Plasma 5 -> also prefers IconName but has no panel palette, so the SVG's color there is untested
+│   │   ├── A running Plasma session -> told to reload icons after Hex writes the file, since KIconLoader lists hicolor folders at startup
+│   │   ├── A user's own file at that name -> kept and named; a dangling link or failed write -> the name is unset
+│   │   └── Default color -> the same light/dark guess as the pixmap
+│   ├── Mark (pixmap) -> white; black when the desktop's color scheme prefers light (portal Settings color-scheme)
+│   │   ├── Read once when the tray is created; a later switch applies at the next launch
 │   │   ├── // check: only_an_explicit_light_color_scheme_gets_the_dark_mark
-│   │   │   // decodes the portal value; not checked against a real KDE or GNOME panel
-│   │   └── KDE's portal derives the scheme from the window palette, so a mixed theme
-│   │       with light windows and a dark panel (Breeze Twilight) gets the black mark on
-│   │       a dark panel
+│   │   │   // decodes the portal value
+│   │   └── Shown by hosts that don't use theme names, or can't find the name (Waybar falls back)
 │   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
@@ -1850,12 +1963,14 @@ Linux beta                               // not macOS feature parity
 │       Home Manager's programs.hex.autostart, `systemctl --user enable`) -> on;
 │       turning it off errors, naming where to disable it; no entry is written (#1164)
 │       // check: an_enabled_systemd_unit_starts_hex_at_login (the link scan only)
-├── Microphone failure -> Same recovery as macOS (RecoveringAudioInput)
-│   ├── Stream fails -> Cancel an unfinished capture, "reopening" failure, retry with backoff
+├── Microphone failure -> Same recovery as macOS, except an interrupted dictation is never kept (RecoveringAudioInput)
+│   ├── Stream fails -> Cancel an unfinished capture (macOS transcribes and copies a held one), "reopening" failure, retry with backoff
 │   ├── Startup open fails -> Retry with backoff; the listener keeps running
 │   └── Released while idle, on-demand open fails -> Failed entry; stays released
-│   └── Overload (Xrun) glitch -> Logged; not a failure
+│   └── Overload (Xrun) glitch -> Counted; the polling thread logs one line per burst; not a failure
 ├── Paste -> Restore the previous clipboard 500 ms after the shortcut  // linux.clipboard-restore
+│   ├── Labs > Keep dictation on clipboard (off) -> no snapshot, no restore; an
+│   │   earlier paste's pending restore stands down and the dictation stays (labs.md)
 │   ├── Before the transcript -> snapshot every format (32 MiB, 1 s); empty -> cleared again
 │   ├── Later paste, copy, or another client replaced the transcript -> left alone
 │   ├── Over the cap or unreadable -> transcript stays; the log says why
@@ -1985,10 +2100,12 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │       pays the adapter check too, roughly 150 ms
 │   └── A launch that crashed drawing (gpu-draw.pending, written when Rune
 │       starts the launch's first GPU device, left in the data folder, same
-│       version; cleared by the first frame on any surface or a clean quit; a
-│       tray launch that never draws writes none) -> high-performance GPU
-│       (WGPU_POWER_PREF=high), warned in process.log, until Hex updates or
-│       the file is deleted
+│       version; cleared by the first frame on any surface, a clean quit, or
+│       an orderly session end - Rune's quit hook runs on WM_QUERYENDSESSION
+│       and WM_ENDSESSION before the process may end, also for a windowless
+│       launch; a tray launch that never draws writes none) -> high-performance
+│       GPU (WGPU_POWER_PREF=high), warned in process.log, until Hex updates
+│       or the file is deleted
 ├── Present cadence -> after any change the window presents every refresh for
 │   1 s, then rests: windowed G-SYNC/FreeSync sees one rate change per
 │   interaction, not a swing per hover (#689; Rune e2ea18e4; not run on Windows)
@@ -2002,6 +2119,14 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
 │   start, inside that monitor's work area, at its own DPI (#486); while
 │   shown, checked every 250 ms; moves once two checks agree (#807)
+├── HUD start -> a fresh first-frame attempt (own baseline, clock, and one
+│   recovery hide): no frame in 1.5 s -> hidden at once (not the exit fade,
+│   which needs a frame), so Rune releases the window and GPU surface and the
+│   next capture makes both again. A second start restarts the attempt, a
+│   previous attempt's reason never hides the new one, each attempt hides at
+│   most once, and the next start hides again if it is frame-less too. Rune's
+│   overlay failure is the Settings/log reason only. Logged once per reason;
+│   Settings' listener warning (dictation.md, rune_hud::FirstFrame)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch
@@ -2296,7 +2421,9 @@ TypeScript SDK + local service             // macOS, Linux, Windows
 │   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running app's /transcriptions -> Listener's engine when it holds the model
 │   ├── Otherwise the service's own copy of the requested model
-│   └── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
+│   ├── ?process=global -> Global mode's output processing (Labs › Process API transcripts)
+│   └── ?timestamps=segment|word -> The model's own segment or word times
+│       └── 422 unsupported-timestamps when it has no such level (Labs › Timestamps in API transcripts)
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   ├── No silence gate                  // model output, unlike hotkey dictation;
 │   │                                     // only recognition-hint echoes are dropped
@@ -2353,6 +2480,15 @@ or without the parameter, responses are unchanged raw transcripts, and the
 embedded helper installs no processor (`409 processing-unavailable`, even
 with the lab off). Processing runs one at a time (`429 queue-full`).
 `/capabilities` always includes `outputProcessing`.
+
+`timestamps=segment|word` (Labs › Timestamps in API transcripts, off by
+default) makes `POST /transcriptions` return the speech model's own
+`segments`, and for `word` its `words`, with `timestampGranularity`; times
+are milliseconds from the submitted audio's start. Absent and `none` keep the
+response unchanged; off, a timed request is `403 timestamps-disabled`, and a
+model without that native level is `422 unsupported-timestamps`. Nothing
+estimates the times, and `/streams` and `/dictations` are unchanged
+([labs.md](labs.md), [service contract](../specs/local-transcription-service.md)).
 
 The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and
@@ -2462,8 +2598,8 @@ best-effort deletion is not guaranteed deletion.
 `dev.rune-ui` lives in [rune_ui.rs](../../src/rune_ui.rs) and its pane modules;
 its tests drive the Rune runtime headlessly (navigation; General rows per
 shortcut source, fitting the default window with Advanced collapsed, Shortcut mode's modal, saves through the host, Quit Hex, microphone-release
-confirmation, shortcut recording and Escape, conflicts; History select, delete, two-step
-clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
+confirmation, shortcut recording and Escape, conflicts; History select, two-step
+delete and clear, copy; Modes add/delete, corrections, transformations (drag reorder saves once
 on release), application conflicts, a chosen file joining the mode, arrow
 keys in the model and application searches; the picker's ChooseModel/CancelModel; setup's download; draft
 saves; and, from macOS/Windows preview data, each OS's panes and rows, Launch
