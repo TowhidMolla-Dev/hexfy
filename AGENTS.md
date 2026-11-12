@@ -7,8 +7,8 @@
 ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
 `dev`, and merge it yourself once it compiles (don't wait on CI); merge any open PR without
 asking. After merging, update the installed copy. See
-`~/code/control/AGENTS.md`. `production` holds what was released and moves
-only by a fast-forward from `dev` when Kit releases; never commit to it.
+`~/code/control/AGENTS.md`. Publish releases from `dev`. Fast-forward
+`production` only to deploy the site; never commit to it.
 There is no `main`.
 
 Any change to what the window draws regenerates the goldens in the same PR:
@@ -78,7 +78,10 @@ substitute for source inspection or a second roadmap.
 - `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
   microphone, else the system default, never Hex Microphone), the CoreAudio
   default-input and device-list listeners, timestamped mono float PCM
-  delivery, live selection, and bounded stream recovery. `audio/fixture`:
+  delivery, live selection, and bounded stream recovery (`audio/recovery`:
+  open failures back off from 250 ms to five seconds, but any stream that
+  fails before proving 8 s of steady delivery waits a backoff that doubles to
+  a minute, and failed opens under it grow there too). `audio/fixture`:
   with `HEX_AUDIO_FIXTURE=<wav>` every microphone open plays that file
   instead (10 ms chunks at real-time pace, from its start at each open,
   looping) and no device is enumerated or opened, so benchmarks drive the
@@ -91,6 +94,12 @@ substitute for source inspection or a second roadmap.
   observation (macOS TIS, Windows foreground-window layout, X11 XKB groups;
   Wayland has no general protocol) and the shared debounced policy that turns a
   mapped source into an installed-only model-picker choice.
+- `transcription/app_model_switching`: the matching debounced policy for a
+  dictation mode's optional speech model and language (Labs › Switch model with
+  app, macOS and Windows): the frontmost app's mode choice becomes an
+  installed-only picker preparation once idle. Both OSes match by application,
+  never by website, and Hex's own window (or no app in front) is ignored;
+  Linux has no host for it.
 - `dictation`, `dictation/diagnostics`: warm pre-roll, growable capture, 16 kHz
   local-transcription resampling, and owner-only diagnostic WAV retention when
   `HEX_RETAIN_DICTATION_AUDIO` is set.
@@ -380,6 +389,10 @@ substitute for source inspection or a second roadmap.
 - `linux/tray`: the optional tray icon, a `rune::Tray` (StatusNotifierItem
   with a dbusmenu built by `desktop/tray_menu`). It registers whenever a tray host
   (`org.kde.StatusNotifierWatcher`) appears; without one Hex runs unchanged.
+  Beside the IconPixmap it serves Hex's symbolic theme icon when hicolor has it,
+  so Plasma 6, GNOME's AppIndicator extension, and Waybar draw the mark in the
+  panel's text color, and asks a running Plasma session to reload icons after
+  writing it.
 - `desktop/tray_menu`: the tray menu Linux and Windows share (recording state, Show
   Hex, Paste last dictation, the downloaded-model picker, the update item,
   Enable / Disable Hex, Quit Hex) and the model entries the macOS menu bar
@@ -779,8 +792,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   no pre-roll, preserves the physical press for the hold threshold, discards a
   release before readiness, and closes only after the authoritative capture is
   idle. Accepted jobs never keep the stream open. A stream failure before the
-  hold threshold returns the press to pending and reopens; later failures fail
-  the capture. Cold opens retry the selected device briefly before falling back.
+  hold threshold returns the press to pending and reopens; on macOS, a later
+  failure keeps the audio already delivered as a copy-only dictation, or fails
+  the capture when no audio after the start arrived or it is near-silent. Cold
+  opens retry the selected device briefly before falling back.
 - Model inference, optional post-processing, and paste must
   never block authoritative audio capture. Their queues remain bounded.
 - CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
@@ -905,14 +920,32 @@ CoreAudio formats, AppleScript details, or event serialization.
   kept. An explicit CLI `--device` remains authoritative for that listener
   process and never falls back. A stream that already failed or delivered
   digital silence is stopped before its replacement opens, so the replacement
-  starts with no dictation stream on the device, as at launch. A runtime stream
-  failure cancels an incomplete capture (a programmatic one keeps the audio
-  delivered before the failure for its owner's `/finish`, which answers
-  `microphone-lost` when there is none), discards stale chunks, and retries
-  with bounded backoff; it must not require a settings change or process
-  restart. An initial open failure uses the same bounded recovery without
-  stopping the listener. Cancellation does not stop warm-microphone retries;
-  enabling release-while-idle stops them once capture is idle.
+  starts with no dictation stream on the device, as at launch. On macOS, a
+  runtime stream failure keeps a shortcut dictation held past the hold
+  threshold, or a `hex dictation start` control capture, along with the audio
+  delivered before the failure: transcribed and processed like a dictation
+  (Dictate without processing copies it unprocessed), then copied rather than
+  pasted (the disruption may have moved focus), still Paste Last Dictation and
+  History, with no error tone. A clip with no audio after its
+  start, or a near-silent one, fails as before; a programmatic capture keeps
+  its audio for its owner's `/finish`, which answers `microphone-lost` when
+  there is none. Audio from after the loss and stale chunks are dropped, and
+  the stream retries with bounded backoff; it must not require a settings
+  change or process restart. Any stream that fails before it has delivered for
+  8 s (STREAM_PROVEN_UPTIME) never proved steady delivery, so its reopen backs
+  off from 250 ms to a minute, and failed opens under that backoff grow there
+  too; one that delivered steadily still reopens at once. A route change or a
+  dictation press retries at once without resetting that backoff. An
+  initial open failure uses the same bounded
+  recovery without stopping the listener. Cancellation does not stop
+  warm-microphone retries; enabling release-while-idle stops them once capture
+  is idle.
+- On Linux, opening ALSA's default device loads PipeWire's ALSA plugin into
+  Hex's own process, so `main` sets `DISABLE_RTKIT` before any stream opens:
+  PipeWire's realtime module would otherwise lower this process's realtime CPU
+  time limit to the desktop portal's advertised budget, which can be zero, and
+  the kernel then kills Hex. Hex never takes realtime scheduling through the
+  portal or rtkit.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
@@ -1114,7 +1147,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   `capture.routing`'s autoSend on, routed by Scrawl's router in Hex's process
   (`capture_host::routing`): one `capture-look` thread per stop, one
   `capture-route` thread with a bounded queue, a rule's send held 3 s for
-  Undo, guesses sent only when picked. Queued sends retry only while neither
+  Undo (a page naming its session, by meta tag or `.opencode-session`, sends
+  like a rule and beats one), guesses sent only when picked. Queued sends retry only while neither
   Scrawl.app runs nor anything serves the ingest port, and never in tests.
   `capture.routing` never holds a Jev key. A cabled iPhone records through
   `scrawl-helper mirror --no-microphone`, narrated by the dictation timeline
@@ -1355,7 +1389,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   PNGs into `~/.local/share/icons/hicolor` at startup and names that icon in
   the managed entries it or the installer wrote (#652). The PNGs carry an
   `X-Hex-Managed=true` text chunk: Hex replaces and the installer removes only
-  marked regular files, never a user's own icon or a symlink. Launch at login is
+  marked regular files, never a user's own icon or a symlink. The tray's
+  `anomaly.hex-symbolic.svg` is a runtime asset, so Hex always writes it to
+  `hicolor/scalable/apps` with the same mark, packaged installs included, and
+  carries KDE's `current-color-scheme` stylesheet so hosts that recolor theme
+  icons draw it in the panel's text color. Launch at login is
   `~/.config/autostart/anomaly.hex.desktop`; where the Background portal exists
   (`linux/background`, #812) Hex asks it at startup to run in the background
   and Launch at login goes through it (the portal writes or removes that file,
@@ -1479,8 +1517,8 @@ The workflow uses npm trusted publishing without requesting a Sigstore
 provenance bundle.
 Use the configured Changesets release command (`cd sdk && bun run release`), not
 direct `npm publish`, after the bootstrap release. Pending changesets on `dev`
-keep a version pull request open into `dev`; the workflow publishes only when
-`production` is fast-forwarded to an unpublished SDK version.
+keep a version pull request open into `dev`; dispatch the SDK workflow on
+`dev` to publish an unpublished SDK version.
 
 ```sh
 ./scripts/setup.sh
@@ -1597,19 +1635,22 @@ GitHub OIDC token, under app `hex`, artifact `desktop`;
 [`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
 target and file names and the direct-install receipt, and
 [`docs/releasing.md`](docs/releasing.md) owns the workflow, channels, secrets,
-and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
-(and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
-there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
+and old clients. The 2.3.1 feeds at `https://anoma.ly/hex/files` (and Kit's
+`downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting there)
+stay frozen; the appcast there is `packaging/macos/legacy-appcast.xml`, served
+by the site build. GitHub app releases use `v<VERSION>` tags (`app-v…`
 through 2.3.1); each stable one is created as GitHub's Latest release
 (`--latest=true`, stable only), and SDK releases (`release-typescript.yml`)
 are created with `--latest=false` so they never take the badge. Nothing
 downloads through GitHub's `releases/latest` redirect. Never overwrite a published artifact with different bytes.
 `https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
-`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
-bucket `hex-production-files`) and the dev Worker `hex-dev-site` (dev.anoma.ly/hex,
-bucket `hex-dev-files`); `cf deploy --prebuilt --mode <mode>` picks one, and
-only CI deploys: a push to `dev` touching `site/` deploys dev, a stable
-Release deploys production. No subdomains. The site's download links come
+`site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex)
+and the dev Worker `hex-dev-site` (dev.anoma.ly/hex), both reading the frozen
+2.3.1 history from `hex-production-files`; the installers and appcast ship with
+the site build and the dev notes come from the `dev-notes` branch.
+`cf deploy --prebuilt --mode <mode>` picks one, and
+only CI deploys: Deploy (`deploy.yml`) runs on site changes or a dispatch
+from `dev` or `production`, and deploys the site for that branch. No subdomains. The site's download links come
 from the service's stable manifest when it builds. After publishing a version,
 bump the explicit GitHub mirror/version link in `README.md`; the Release
 workflow updates the Homebrew cask. `bun run --cwd site check:downloads` fails until every download link
@@ -1690,9 +1731,9 @@ run only in Release's check and stable channels and by hand
 
 Every platform is built, signed, and published by one run of
 `.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
-Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
+Dispatch it from `dev` with the `channel` input: `check` builds and
 verifies without publishing, `dev` publishes the dev channel, `stable` the
-public release; dispatched from `production` only). Tags never start a
+public release. Tags never start a
 release: like OpenCode, the stable run tags `v<VERSION>` (the crate version)
 on the released commit only after every platform published, then creates the
 GitHub release with the built-in `GITHUB_TOKEN`, so a failed run leaves no
@@ -1705,12 +1746,15 @@ check out only `.github/release/`, and run only those scripts and SHA-pinned
 actions on artifacts treated as data (macOS Developer ID signing,
 notarization, and stapling; Azure Authenticode; the release service through
 OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
-whose digest its job reports and every consumer checks. Site deploy follows
-the same split: its build job has no secret, and its `release` job runs only
-`.github/release/deploy-site.sh`, which deploys the verified Build Output only
+whose digest its job reports and every consumer checks. Deploy
+(`.github/workflows/deploy.yml`) follows the same split: its build job has no
+secret, and its deploy job (in `dev` or `production`) runs only
+`.github/release/cloudflare-token.sh` (which mints a 15-minute Cloudflare
+token after assuming the environment's role) and `.github/release/deploy-site.sh`,
+which deploys the verified Build Output only
 when it names exactly that mode's site Worker, routes, and bindings, with the
-cf CLI locked in `.github/release/cf/`; Legacy appcast checks out only
-`.github/release/` and the appcast. Keep that boundary:
+cf CLI locked in `.github/release/cf/`; its build job runs the installer test
+and the appcast check on repository code, no secret. Keep that boundary:
 never add a step that builds, installs dependencies, or runs repository code
 to a job that holds a secret or an OIDC token, and pin every action by SHA.
 `.github/` changes need Dax (CODEOWNERS and the "release boundary" ruleset).
@@ -1723,10 +1767,9 @@ teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
 themselves, and neither do local builds (`HEX_LOCAL_BUILD=1`, the owner's own
 build from a checkout: footer "Local build · updates off", version label with its
 commit, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
-build (the service lets a run from `dev` publish only the `dev` channel, and
-only signed platforms are published). Stable runs only from `production`.
+build for signed platforms. Stable requires a manual dispatch on `dev`.
 Like OpenCode, every run uses the one `release` environment, with no
-required reviewer; its deployment policy admits `dev` and `production`. Rerunning
+required reviewer; its deployment policy admits only the `dev` branch. Rerunning
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 
@@ -1766,7 +1809,7 @@ q8_0, and q5_0 (NB-Whisper Medium) tensors and no MUL_MAT_ID (`CMAKE_ARGS` in
 use another type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog
 gains a model that needs one. Release executables are stripped (`[profile.release]`). The
 installers live in the locked `.github/release/` (`install-linux.sh`,
-`install-windows.ps1`; the Installers workflow serves them at
+`install-windows.ps1`; the site build serves them at
 `https://anoma.ly/hex/files/`) and install from the service's manifest,
 checking each file's size and SHA-256 plus the Linux ed25519 signature or the
 Windows Authenticode signature; `scripts/test-install-linux-release.sh`

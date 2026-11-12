@@ -976,6 +976,13 @@ impl PickerOverlay {
         self.overlay.set_exclude_from_capture(!shown);
     }
 
+    /// Changes the whole display's badge from the next time it shows, as
+    /// the screenshot picker does to record rather than shoot.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn set_screen_label(&self, label: &'static str) {
+        self.overlay.update(move |s, _| s.screen_label = label);
+    }
+
     /// Shows the picker for `mode`, or closes it; safe from any thread.
     pub(crate) fn set(&self, mode: Option<Mode>) {
         // Wayland lists no windows to pick from: the portal's picker does.
@@ -1261,7 +1268,7 @@ pub(crate) mod tests {
             Window {
                 id: 1,
                 frame: [120.0, 90.0, 520.0, 340.0],
-                label: "Brave Browser — problems.kitlangton.com".into(),
+                label: "Brave Browser — example.com".into(),
             },
             Window {
                 id: 2,
@@ -1403,7 +1410,7 @@ pub(crate) mod tests {
         );
         assert!(window.camera);
         let badge = window.badge.unwrap();
-        assert_eq!(badge.text, "Brave Browser — problems.kitlangton.com");
+        assert_eq!(badge.text, "Brave Browser — example.com");
         // Centred on the window.
         assert!((badge.rect[0] + badge.rect[2] * 0.5 - 380.0).abs() < 0.5);
 

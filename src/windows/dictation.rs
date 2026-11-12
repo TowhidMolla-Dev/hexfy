@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 
+use crate::audio::linger::MicrophoneLinger;
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::control::{CaptureAction, PrintReply, PrintedTranscript};
 use crate::desktop::events::{
@@ -59,7 +60,8 @@ struct Job {
     language: String,
     /// The clip, kept for History while Labs › Keep recordings is on.
     recording: Option<crate::history::Recording>,
-    /// The shortcut that started this capture (dictation, raw, or terminal).
+    /// The shortcut that started this capture (dictation, raw, terminal
+    /// paste, or second dictation).
     flavour: crate::dictation::DictationFlavour,
     /// `hex dictation stop --print`: the text goes here, never pasted.
     print: Option<PrintReply>,
@@ -99,6 +101,8 @@ pub struct WindowsDictationConfig {
     pub raw_dictation_hotkey: Option<WindowsHotkey>,
     /// Labs › Terminal paste shortcut, while the lab is on and it is bound.
     pub terminal_paste_hotkey: Option<WindowsHotkey>,
+    /// Labs › Second dictation shortcut, while the lab is on and it is bound.
+    pub second_dictation_hotkey: Option<WindowsHotkey>,
     /// The Annotate key, while Annotate is on.
     pub annotate_hotkey: Option<WindowsHotkey>,
     /// Toggle mode's cancel shortcut; none in Hold mode.
@@ -157,6 +161,9 @@ impl WindowsDictationConfig {
             terminal_paste_hotkey: settings
                 .active_terminal_paste_hotkey()
                 .map(WindowsHotkey::from),
+            second_dictation_hotkey: settings
+                .active_second_dictation_hotkey()
+                .map(WindowsHotkey::from),
             annotate_hotkey: settings
                 .capture_on()
                 .then(|| WindowsHotkey::from(&settings.capture.hotkey)),
@@ -205,18 +212,12 @@ pub fn run(
     } else {
         Some(LocalTranscriber::load(selection)?)
     };
+    // The hook's shortcuts from the same settings, before its fields are
+    // destructured below.
+    let mut shortcuts = Shortcuts::from_config(&config);
     let WindowsDictationConfig {
         device,
         hotkey,
-        paste_last_hotkey,
-        raw_dictation_hotkey,
-        terminal_paste_hotkey,
-        annotate_hotkey,
-        cancel_hotkey,
-        double_tap_lock,
-        double_tap_only,
-        shortcut_mode,
-        share_dictation_shortcut,
         while_dictating,
         release_microphone_while_idle,
         feedback_volume,
@@ -231,6 +232,7 @@ pub fn run(
         swap_failures,
         commands,
         dictations,
+        ..
     } = config;
     // Read by the output worker at each paste, so a change applies in place.
     let paste_with_shift = Arc::new(AtomicBool::new(paste_with_shift));
@@ -245,6 +247,9 @@ pub fn run(
         tracing::warn!(%error, "Windows recording feedback is unavailable");
     }
     let mut release_while_idle = release_microphone_while_idle;
+    // Labs › Keep mic open after dictating: a finished capture's
+    // microphone stays open for its window before release.
+    let mut linger = MicrophoneLinger::default();
     let mut device = device;
     let mut input = create_input(
         device.as_deref(),
@@ -277,19 +282,7 @@ pub fn run(
         return Ok(());
     }
     let hotkey_label = hotkey.label();
-    let mut toggle_mode = shortcut_mode == crate::dictation::ShortcutMode::Toggle;
-    let mut shortcuts = Shortcuts {
-        hotkey,
-        paste_last_hotkey,
-        raw_dictation_hotkey,
-        terminal_paste_hotkey,
-        annotate_hotkey,
-        cancel_hotkey,
-        double_tap_lock,
-        double_tap_only,
-        shortcut_mode,
-        share_dictation_shortcut,
-    };
+    let mut toggle_mode = shortcuts.shortcut_mode == crate::dictation::ShortcutMode::Toggle;
     let mut hotkey = shortcuts.start()?;
     // A shortcut event the idle wait took, handled at the next turn.
     let mut held_event = None;
@@ -310,8 +303,6 @@ pub fn run(
     let mut capture_host =
         crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
     let capture_controls = crate::capture_host::listen_for_controls();
-    // The microphone stays open for a capture even while released when idle.
-    let mut capture_holds_microphone = false;
     let mut finishing: Option<Finishing> = None;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
@@ -363,6 +354,28 @@ pub fn run(
         device_label, hotkey_label
     );
 
+    // Labs › Keep mic open after dictating: the one release check the pass and
+    // its event sites share, so a press handled in the same pass still sees a
+    // closed microphone at once when the lab is off.
+    macro_rules! release_microphone {
+        () => {
+            if release_while_idle
+                && input.is_active()
+                && linger.may_close(
+                    Instant::now(),
+                    recording
+                        || start_pending
+                        || finishing.is_some()
+                        || service.is_active()
+                        || timeline.wants_audio(),
+                )
+            {
+                input.close();
+                audio_ready = false;
+            }
+        };
+    }
+
     while !shutdown.load(Ordering::Relaxed) {
         if let Some(failed) = model.poll() {
             fail(&events, failed.error.clone())?;
@@ -380,18 +393,7 @@ pub fn run(
         {
             let next_config = WindowsDictationConfig::from_settings(&next);
             paste_with_shift.store(next_config.paste_with_shift, Ordering::Relaxed);
-            let next_shortcuts = Shortcuts {
-                hotkey: next_config.hotkey,
-                paste_last_hotkey: next_config.paste_last_hotkey,
-                raw_dictation_hotkey: next_config.raw_dictation_hotkey,
-                terminal_paste_hotkey: next_config.terminal_paste_hotkey,
-                annotate_hotkey: next_config.annotate_hotkey,
-                cancel_hotkey: next_config.cancel_hotkey,
-                double_tap_lock: next_config.double_tap_lock,
-                double_tap_only: next_config.double_tap_only,
-                shortcut_mode: next_config.shortcut_mode,
-                share_dictation_shortcut: next_config.share_dictation_shortcut,
-            };
+            let next_shortcuts = Shortcuts::from_config(&next_config);
             if next_shortcuts != shortcuts {
                 // The old hook goes first; one keyboard hook runs at a time.
                 drop(hotkey);
@@ -491,25 +493,10 @@ pub fn run(
                 tracing::warn!(message, "a capture command did nothing");
             }
         }
-        // A capture copies this microphone: a released one opens for it,
-        // and closes again once nothing records.
-        if release_while_idle {
-            let wants = timeline.wants_audio();
-            if wants && !input.is_active() {
-                input.request_open();
-            }
-            if wants {
-                capture_holds_microphone = true;
-            } else if capture_holds_microphone
-                && !recording
-                && !start_pending
-                && finishing.is_none()
-                && !service.is_active()
-            {
-                capture_holds_microphone = false;
-                input.close();
-                audio_ready = false;
-            }
+        // A capture copies this microphone: a released one opens for it, and
+        // the one release check below closes it once nothing records.
+        if release_while_idle && timeline.wants_audio() && !input.is_active() {
+            input.request_open();
         }
         if let Ok(error) = hotkey.errors.try_recv() {
             return Err(eyre!("Windows hotkey monitor stopped: {error}"));
@@ -553,10 +540,9 @@ pub fn run(
                 });
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                audio_ready = false;
-            }
+            // The capture's end releases the microphone here, as before, when
+            // the lab is off.
+            release_microphone!();
         }
         // `/dictations`: a client's dictation never ends a shortcut capture,
         // and only its owner (or its lapsed lease) ends it.
@@ -583,7 +569,10 @@ pub fn run(
                     service_ended |= !service.is_active();
                 }
                 // Recording starts at the released microphone's first chunk.
+                // A failed stream keeps its backoff, but the client's start
+                // asks for the microphone now.
                 Effect::Start => {
+                    input.retry_now();
                     if !input.is_active() {
                         input.request_open();
                     }
@@ -621,10 +610,8 @@ pub fn run(
                 indicator.as_ref(),
                 &mut service_recording,
             );
-            if release_while_idle && !timeline.wants_audio() {
-                input.close();
-                audio_ready = false;
-            }
+            // A client's dictation ended here before too.
+            release_microphone!();
         }
         for (id, result) in service_finished.try_iter() {
             service.complete(id, result);
@@ -665,6 +652,13 @@ pub fn run(
                         host.annotate_up(&timeline);
                     }
                 }
+                // A failed stream keeps its backoff; the press asks for the
+                // microphone now, though it cannot capture until it opens.
+                HotkeyAction::Start
+                    if !recording && input.is_recovering() && !release_while_idle =>
+                {
+                    input.retry_now();
+                }
                 HotkeyAction::Start
                     if !recording && (audio_ready || (release_while_idle && !start_pending)) =>
                 {
@@ -687,7 +681,12 @@ pub fn run(
                         start_tone_played = true;
                     } else {
                         // The released microphone opens on demand; recording
-                        // begins at the first chunk (no audio pre-roll).
+                        // begins at the first chunk (no audio pre-roll). A
+                        // failed stream keeps its backoff, but the press
+                        // asks for it now.
+                        if input.is_recovering() {
+                            input.retry_now();
+                        }
                         start_pending = true;
                         input.request_open();
                         crate::feedback::prepare();
@@ -703,10 +702,7 @@ pub fn run(
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
                     audio_suppressor.restore();
-                    if !timeline.wants_audio() {
-                        input.close();
-                        audio_ready = false;
-                    }
+                    release_microphone!();
                     if let Some(print) = print.take() {
                         print.send(PrintedTranscript::NoSpeech);
                     }
@@ -763,10 +759,7 @@ pub fn run(
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_current_state(&mut events, recording, pending, &device_label)?;
-                    if release_while_idle && !timeline.wants_audio() {
-                        input.close();
-                        audio_ready = false;
-                    }
+                    release_microphone!();
                 }
                 HotkeyAction::PasteLast if !recording => {
                     submit_paste_last(
@@ -831,6 +824,13 @@ pub fn run(
             }
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
+
+        // The released microphone closes once nothing records, no client
+        // dictates, no release tail runs, no capture copies it, and Labs ›
+        // Keep mic open after dictating's window has passed. This also
+        // releases one a stream interruption left open, which the old
+        // latch-based sites never did.
+        release_microphone!();
 
         let idle = !recording
             && !start_pending
@@ -906,10 +906,9 @@ pub fn run(
                             chunk_captured_through,
                             input.sample_rate(),
                         );
-                        if !service_recording && release_while_idle && !timeline.wants_audio() {
-                            input.close();
-                            audio_ready = false;
-                        }
+                        // A start that gave up releases the microphone here,
+                        // as before, when the lab is off.
+                        release_microphone!();
                     }
                     emit_current_state(&mut events, recording, pending, &device_label)?;
                     continue;

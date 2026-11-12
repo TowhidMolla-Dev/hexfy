@@ -28,7 +28,8 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │   └── Granted -> the Allow pill morphs into a green Allowed; moves to Advanced
 │   ├── After a meeting -> Summaries, Keep meetings, Keep audio
 │   │   (Labs › Expire meeting audio separately), Transcript folder
-│   │   (~/Documents/Hex Meetings; Reveal / choose; its error shows here)
+│   │   (~/Documents/Hex Meetings; Reveal opens the folder itself; choose
+│   │   another folder; its error shows here)
 │   │   └── Summaries pop-up (meetings.summaries; one-time migration
 │   │       "meeting-summaries-choice" from the two retired switches)
 │   │       ├── Off -> "No titles or summaries"
@@ -120,12 +121,46 @@ System audio                                      // meetings.system-audio
 ├── Linux -> pw-record of the default output's monitor (stream.capture.sink);
 │   the session manager follows a changed default; no pw-record -> recording
 │   refuses with "Install PipeWire's pw-record"
-└── Windows -> WASAPI loopback of every active output (cpal), mixed into the
-    one system track, so a call playing on a headset that isn't the default
-    output is recorded (#1221; audio_on_any_output_reaches_the_system_track,
-    unverified on a real call); silence while nothing plays is padded on
-    resume; a change in the list of outputs reopens it; an output whose
-    loopback fails is dropped while the others keep recording
+└── Windows -> WASAPI loopback (cpal) of the outputs the call app plays on,
+    mixed into the one system track, so a call playing on a headset that
+    isn't the default output is recorded (#1221). A call recording prefers
+    the outputs where the app's own microphone holder also plays, then any
+    output one of its processes plays on, so a virtual mixer's (SteelSeries
+    Sonar, VB-Cable, Voicemeeter) playback of the user's processed
+    microphone and replay of the call is not mixed in; for a manual
+    recording, every active output is heard. While a detected call app has
+    no playback session yet, or its sessions can't be read, every output is
+    heard until the 2 s check finds the app's outputs. When none of the
+    app's outputs open, Hex hears every output and stops following the app
+    for that source. Silence while nothing plays is padded on resume. A
+    route check every 2 s reopens on a changed output list while hearing
+    every one, or when the app's outputs move (by endpoint id): a changed
+    microphone-holder set, or any change between app sets. Outputs chosen
+    from the microphone holder stay open for an app set that still covers
+    them: that is the same call seen without its holder, so reopening only
+    for a second process's extra outputs would reopen back on the next
+    check once the holder returns. Once the outputs came from an app set,
+    only that same set stays open, because a new endpoint would otherwise
+    never be heard. A temporarily absent session or a failed enumeration
+    keeps the current outputs too. A source that stopped following the app
+    because none of its outputs would open follows it again when a changed
+    output list reopens it. An output whose loopback fails is dropped while
+    the others keep recording.
+    // checks: the selection is pure and tested in
+    // meeting/loopback_route.rs: the_microphone_holder_s_output_beats_
+    // another_process_of_the_same_app,
+    // a_microphone_holder_that_plays_nothing_falls_back_to_the_app_s_outputs,
+    // the_mixer_s_microphone_endpoint_is_never_chosen,
+    // an_app_with_no_active_render_session_hears_every_output,
+    // a_manual_recording_hears_every_output, and its route changes by
+    // a_different_microphone_holder_output_reopens,
+    // an_app_output_set_that_covers_the_current_one_does_not_reopen,
+    // an_app_output_set_that_leaves_out_the_current_one_reopens,
+    // an_app_set_that_grows_beyond_an_app_set_reopens,
+    // an_app_set_equal_to_the_microphone_holder_s_does_not_reopen,
+    // every_output_keeps_what_is_open; the mix still by
+    // audio_on_any_output_reaches_the_system_track (meeting/windows.rs);
+    // unverified on real hardware
 Call detection                                    // meetings.detect
 ├── Linux -> one pw-dump --monitor: running Stream/Input/Audio nodes that are
 │   not monitor captures, by application.process.binary (node or client)
@@ -171,12 +206,14 @@ Offer capsule can't open (Linux; GNOME on Wayland opens no interactive
     │   focus; if Rune still can't open them, the pane path above
     │   // checks: linux/meeting_capsules.rs gating tests; not run on GNOME
     └── not observed on a real GNOME session; no automated check
-Files -> Reveal files opens the recording folder (selected in Explorer,
-    opened by xdg-open); Reveal Markdown additionally appears while the
+Files -> Reveal files opens the recording folder itself (Explorer and
+    xdg-open open it); Reveal Markdown additionally appears while the
     exported .md exists and selects it (Explorer gets `/select,"<path>"`,
     with the switch outside the quotes so a folder such as `Hex Meetings`
     stays one path) or opens the folder holding it (xdg-open); Delete moves
     to the freedesktop Trash or the Recycle Bin
+    // checks: explorer_opens_a_folder_itself_without_the_select_switch;
+    // not observed on a real Windows machine
 ```
 
 The pane's Start recording, Stop & transcribe, Rename, Delete, Reveal, and
@@ -257,12 +294,16 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      ├── A call whose page names a meeting code (Google Meet's, from the
      │   address or a code-only tab title) is snoozed by that code: another
      │   code in the same browser is a new call and is offered or recorded;
-     │   a page without a code still counts as the snoozed call (#1113)
+     │   a `/meet/<code>` address (Arc opening a Calendar link) resolves to
+     │   its code, and a page without a code still counts as the snoozed
+     │   call (#1113)
      └── Stopped by hand -> the snooze ends once the call app has been off
          the microphone for 3 s (seen while transcribing too), so the next
          call in the same app is offered; a dismissed offer keeps the minute
          for a muted call dropping off mid-call. Checks:
          `a_different_meet_call_in_the_same_browser_is_not_snoozed_by_the_first`,
+         `meet_prefixed_addresses_are_snoozed_by_their_own_codes`,
+         `extracts_a_meet_code_from_a_meet_prefixed_address`,
          `a_stopped_call_s_app_is_snoozed_only_until_it_leaves_for_a_few_seconds`
   -> "Left the call" prompt after the call app is off the microphone for 3 s
   -> Times are wall-clock runs: observations more than 10 s apart (sleep, a
@@ -715,6 +756,8 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │   │   saved device returns, mid-meeting
 │   │   -> New input opens before the old drops; same track, no retry gap
 │   │      // macOS only (meetings are macOS); a failed open keeps the old input
+│   │      -> a release and a pending renegotiation from the old input are
+│   │         forgotten, not carried over
 │   ├── Saved device listed but would not open -> System default stands in
 │   │   -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
 │   └── Stream delivers only exact zeros for 3 s (#1518)
@@ -723,24 +766,77 @@ Capture sources (meeting/capture.rs)                // meetings.capture
 │          reopens or warns, and neither does an app that reports no input
 │       -> a gated or noise-suppressed microphone the call app also uses
 │          still counts as held, so it can trigger the reopens and warning
-│       -> Reopened like a failed source, at most twice in one recording,
-│          the budget shared by every reopened stream
+│       -> Reopened like a failed source, at most twice in one recording
+│          (the call app holding the input and 3 s of exact zeros), the
+│          budget shared by every stream it reopens; audio coming back does
+│          not restore it, because each reopen changes the device's rate
+│       -> macOS: every silence reopen makes the device renegotiate its
+│          sample rate first, like dictation's silence recovery (#1575),
+│          briefly interrupting every other stream on that mic, the call
+│          app's and a warm dictation's
+│       -> a renegotiating open spends that attempt when it runs, so a
+│          failed open retries plainly instead of flipping the rate again;
+│          only a deferral for dictation leaves it for a later open
 │       ├── Still silent -> keep recording; the capsule says
 │       │   "Microphone is silent · 12:34" and the menu bar "Microphone is
 │       │   silent"; manifest.microphone.warning is written as soon as it is
 │       │   raised, so a crash keeps it
+│       ├── Still silent after the warning -> only a release runs a
+│       │   renegotiating retry: another process stopped recording from the
+│       │   opened input, read once a second from Core Audio process
+│       │   metadata (device lists only, never samples)
+│       │   -> at most 3 retries per silent episode; silence alone never
+│       │      retries; a release seen before the warning still counts,
+│       │      and one seen before a reopen and gone after it counts too
+│       │   -> a shrinking set of recorders, the call app included, is the
+│       │      change that can let one work
+│       │   -> the release is recorded where it is seen, so a stream that
+│       │      fails before its next chunk cannot lose it; the last set is
+│       │      shared across reopens; the comparison made by our own
+│       │      renegotiating open, and by any reopen within a second of it,
+│       │      ignores a disappearing pid: the driver is restarting, not an
+│       │      app
+│       │   -> needs macOS 14+ process audio metadata, as call-app input
+│       │      detection does; older macOS warns without retrying
+│       ├── A dictation captures or infers -> the quick reopens and the
+│       │   retries wait until it is idle, so a rate change never cuts a
+│       │   dictation; a release stays pending meanwhile, and an open
+│       │   already decided under dictation opens without renegotiating:
+│       │   the still-silent stream reopens once dictation is idle, without
+│       │   spending another reopen or retry
 │       ├── Nonzero audio returns -> the live warning clears, including in a
-│       │   stream reopened after a supervisor restart; the persisted warning
+│       │   stream reopened after a supervisor restart; the episode's
+│       │   retries start over, but the recording's two reopens stay spent,
+│       │   and a pending renegotiation is cleared; the persisted warning
 │       │   stays
-│       ├── The call app leaves the input -> no further reopens or warnings;
-│       │   a live warning stays until nonzero audio returns
-│       ├── Another episode after audio returns -> warns again, never reopens
+│       ├── The call app leaves the input before a warning -> no further
+│       │   quick reopens or warnings until it reports the input again
+│       ├── Another episode after audio returns -> warns at once (the two
+│       │   reopens are spent), then gets its own retries
 │       └── Finished meeting -> its panel says the microphone was silent for
 │           part of the call; the manifest means "silent at some point", not
 │           the last moment
 │          // checks: a_silence_budget_is_shared_across_reopened_streams,
 │          // audible_audio_clears_a_warning_a_reopened_stream_inherited,
 │          // a_microphone_the_call_app_does_not_hold_is_never_reopened_or_warned,
+│          // a_warned_microphone_never_retries_without_a_release,
+│          // a_release_seen_before_the_warning_retries_once_it_shows,
+│          // a_release_seen_before_a_reopen_still_retries_after_it,
+│          // a_release_noted_before_a_failed_source_still_retries_after_its_reopen,
+│          // a_release_triggers_a_warned_retry,
+│          // a_silent_episode_gets_three_release_triggered_retries,
+│          // a_rebuilt_policy_keeps_the_silent_episodes_retries,
+│          // a_warned_microphone_retries_after_the_call_app_lets_go,
+│          // audible_audio_resets_the_episodes_retries,
+│          // a_reopen_waits_while_dictation_is_active,
+│          // a_spent_recording_warns_even_while_dictation_is_active,
+│          // a_release_triggered_retry_waits_while_dictation_is_active,
+│          // a_pending_renegotiation_reopens_once_dictation_is_idle,
+│          // audible_audio_clears_a_pending_renegotiation,
+│          // a_renegotiation_is_taken_once_and_dictation_defers_it,
+│          // a_process_that_stops_recording_between_reopens_is_a_release,
+│          // a_release_just_after_our_own_rate_change_is_not_another_apps,
+│          // a_release_belongs_only_to_the_input_that_saw_it,
 │          // a_sticky_warning_survives_its_live_one_clearing,
 │          // a_dropped_warning_update_is_not_committed_and_is_retried,
 │          // only_an_input_the_call_app_reports_counts_as_held;
@@ -1108,6 +1204,11 @@ Final publication                                   // meetings.output
     │   the new title, keeping the date and time prefix; a taken name adds
     │   " (2)" without overwriting (manifest export_path follows; Reveal,
     │   Trash, and retention read it)
+    ├── Labs › Separate notes file on (off by default) -> exports
+    │   <stem>.transcript.md, then writes <stem>.notes.md beside it when the
+    │   notes are applied; the chosen stem is free of both files, a taken
+    │   pair adds " (2)" to both, and notes_export_path/notes_export_sha256
+    │   follow
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Transcript ready capsule (15 s) -> Copy (Markdown or speaker turns fallback) / Reveal / ✕ closes
@@ -1166,18 +1267,22 @@ Rename -> inline field; Enter or Save          // meetings.rename
   -> empty title refused
 Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
-  -> exported Markdown, then Application Support/meetings/<id>, to the Trash
+  -> exported Markdown, then its tracked notes file, then
+     Application Support/meetings/<id>, to the Trash
   -> refused while recording, transcribing, or writing notes   // meetings.delete
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
-both stay recoverable from the Trash. Sources:
+a separate notes file Hex tracks goes with it, and all stay recoverable from
+the Trash. Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
 `trash` / `rename` in [meeting.rs](../../src/meeting.rs). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
+`deleting_trashes_a_tracked_notes_file_after_the_transcript`,
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,
 `a_rename_follows_the_title_when_descriptive_file_names_are_on`,
+`a_rename_without_descriptive_names_still_retitles_the_notes_file`,
 `notes_rename_the_export_only_with_descriptive_file_names`,
 `retitling_replaces_only_a_matching_first_heading`,
 `the_exported_markdown_is_the_reveal_target_only_while_it_exists`,
@@ -1220,6 +1325,8 @@ Meeting controller, Meetings on or off           // meetings.retention
 │   -> the exported Markdown to the Trash only while its SHA-256 still
 │      matches the copy Hex last wrote (manifest `export_sha256`; Hex's own
 │      heading and notes rewrites keep it current); an edited copy stays
+│   -> a tracked separate notes file to the Trash only while its SHA-256
+│      matches `notes_export_sha256`; an edited copy stays
 ├── Skips recording, transcribing, writing-notes, and final.pending
 │   meetings; a later pass retries them
 └── Nothing expires while Hex is not running
@@ -1267,6 +1374,7 @@ Sources: `retention_for`, `expired`, `expire`, `trash_expired`,
 Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 `until_one_is_chosen_only_meetings_recorded_since_the_default_expire`,
 `expiry_leaves_a_markdown_copy_the_user_edited`,
+`expiry_trashes_a_notes_file_only_while_its_digest_matches`,
 `hex_rewriting_its_markdown_keeps_it_hexs_and_a_user_edit_does_not`,
 `separate_audio_expiry_covers_only_finished_meetings_older_than_it`,
 `audio_expiry_moves_only_the_wavs_and_records_it`, and
@@ -1324,6 +1432,12 @@ Final publication complete                               // meetings.notes
      │       Intelligence", "Written by <provider/model> through OpenCode", or,
      │       for older notes without written_by, no writer at all (#1125;
      │       check: the_notes_footer_names_the_writer_that_wrote_them)
+     ├── Labs › Separate notes file on (off by default) -> <base>.notes.md
+     │   beside the transcript: title, date, duration, app, a relative
+     │   percent-encoded transcript link (its text Markdown-escaped), summary,
+     │   chapters, and its own footer saying the transcript has the details;
+     │   rewritten only while its SHA-256 is still Hex's copy, never recreated
+     │   once deleted
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
   -> Failure / timeout -> notes_error; Markdown untouched; recording stays Complete
@@ -1354,7 +1468,16 @@ and Reveal, Trash, and retention follow the manifest's new `export_path`. A
 failed rename leaves the old path and never fails the notes or the rename. If
 Hex stops between the file rename and the manifest write, the manifest keeps
 the old path: Reveal falls back to the recording folder and the Markdown stays
-in the folder untouched.
+in the folder untouched. With Labs › Separate notes file on, the export is
+`<stem>.transcript.md` and its notes are `<stem>.notes.md`; export chooses a
+stem free of both, a descriptive rename moves the pair together (keeping a
+`.transcript` suffix) and rolls the transcript back if its notes file cannot
+move, and an unedited tracked notes file is re-rendered so its heading and
+transcript link follow notes, a rename, or chapter retitles
+([meeting/notes_file.rs](../../src/meeting/notes_file.rs)). The transcript
+keeps its own `<!-- hex:notes -->` summary block and footer throughout. A notes
+file the user deletes stops being tracked and is never written back, even by a
+later regeneration.
 
 Action items and decisions are gone: other agents read the transcript for
 details (MCP). Older manifests still decode: a list summary is joined into one

@@ -57,12 +57,15 @@ impl Feature {
             | Self::NotchIndicator
             | Self::VocabularyBiasing
             | Self::PauseBrowser
+            | Self::KeepMicrophoneOpen
             | Self::SkipPauses
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
             | Self::QuitClosesWindow
             | Self::SettingsSearch
+            | Self::Appearance
             | Self::ReleaseNotesLink
+            | Self::SpeakersOnly
             | Self::Playground => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
@@ -70,12 +73,19 @@ impl Feature {
             | Self::FillerWords
             | Self::KeepOnClipboard
             | Self::CopyOnly
+            | Self::ReturnToApp
             | Self::GnomeClipboardRestore
             | Self::TypedText
             | Self::TerminalPaste
             | Self::OutputFixes
-            | Self::OpenCodeInWsl => Group::Output,
-            Self::KeepRecordings | Self::HistoryStats | Self::RecentDictations => Group::History,
+            | Self::OpenCodeInWsl
+            | Self::ApiProcessing
+            | Self::ApiTimestamps
+            | Self::PrintStart => Group::Output,
+            Self::KeepRecordings
+            | Self::HistoryStats
+            | Self::HistoryMultiSelect
+            | Self::RecentDictations => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::SubtitleExport
@@ -88,19 +98,24 @@ impl Feature {
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
             | Self::MeetingDescriptiveFilenames
+            | Self::MeetingNotesFile
             | Self::ExpireMeetingAudio => Group::Meetings,
             Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
+            | Self::MoreDictationShortcuts
             | Self::TerminalPasteShortcut
             | Self::SidedChords
             | Self::TapOrHold
+            | Self::DoubleTapModifiers
             | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
             | Self::ShareShortcut
-            | Self::CapsLockDictation => Group::Shortcuts,
+            | Self::CapsLockDictation
+            | Self::PauseMenu => Group::Shortcuts,
             Self::KeyboardModelSwitching
+            | Self::AppModelSwitching
             | Self::UnloadIdle
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
