@@ -7,8 +7,7 @@ use serde_json::Value;
 
 use super::ControlError;
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, HotkeyKey, HotkeySlot,
-    MAX_EXTRA_DICTATION_SHORTCUTS,
+    AppSettings, HotkeyBinding, HotkeyKey, HotkeySlot, MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
 mod hotkeys;
@@ -16,7 +15,7 @@ mod registry;
 
 use hotkeys::check_shortcut;
 pub use hotkeys::{format_hotkey, parse_hotkey};
-use registry::{CAPTURE_KEYS, KEYS, Key, Kind, NUMERIC_CHOICES, RETIRED, needs};
+use registry::{CAPTURE_KEYS, KEYS, Key, Kind, RETIRED, needs};
 
 /// One setting as `hex settings get` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -117,7 +116,6 @@ pub struct ShortcutRules {
 /// Something the host does beyond saving `settings.json`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
-    HistoryRetention(crate::history::HistoryRetention),
     DockIcon,
     /// Check the newly chosen channel now rather than within the hour.
     CheckForUpdates,
@@ -217,7 +215,7 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
             Ok(Some(binding)) => Value::String(format_hotkey(&binding)),
             _ => Value::Null,
         },
-        Kind::Choice(_) if NUMERIC_CHOICES.contains(&key.key) => Value::String(raw.to_string()),
+        Kind::NumberChoice(_) => Value::String(raw.to_string()),
         _ => raw,
     };
     SettingValue {
@@ -225,7 +223,9 @@ fn value_of(key: &Key, json: &Value) -> SettingValue {
         value,
         kind: key.kind.name().into(),
         choices: match key.kind {
-            Kind::Choice(choices) => choices.iter().map(|&choice| choice.into()).collect(),
+            Kind::Choice(choices) | Kind::NumberChoice(choices) => {
+                choices.iter().map(|&choice| choice.into()).collect()
+            }
             _ => Vec::new(),
         },
         writable: key.read_only.is_none()
@@ -289,6 +289,9 @@ pub fn apply(
     let mut effects = Vec::new();
     let message = format!("Set {name}");
     match key.key {
+        "sound_effects" if candidate.sound_effects && candidate.sound_effect_volume <= 0.0 => {
+            candidate.sound_effect_volume = AppSettings::default().sound_effect_volume;
+        }
         "meetings.summaries"
             if candidate.meetings.summaries == crate::app_settings::MeetingSummaries::OpenCode
                 && crate::policy::Policy::current()
@@ -324,6 +327,10 @@ pub fn apply(
             }
         }
         "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
+        "labs.api_browser_origins" => {
+            candidate.labs.api_browser_origins =
+                crate::app_settings::normalize_browser_origins(&candidate.labs.api_browser_origins);
+        }
         "dictation_hotkey"
         | "paste_last_hotkey"
         | "raw_dictation_hotkey"
@@ -442,7 +449,6 @@ pub fn apply(
                 return Err(invalid(name, why));
             }
         }
-        "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),
         "show_dock_icon" => effects.push(Effect::DockIcon),
         "updates.channel" => effects.push(Effect::CheckForUpdates),
         _ => {}
@@ -593,26 +599,17 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
                     &format!("expected a whole number from {min} to {max}"),
                 )
             }),
-        Kind::Choice(choices) => {
+        Kind::Choice(choices) | Kind::NumberChoice(choices) => {
             let normalized = trimmed.to_ascii_lowercase().replace('-', "_");
             let choice = choices
                 .iter()
                 .find(|choice| choice.to_ascii_lowercase().replace('-', "_") == normalized)
                 .ok_or_else(|| invalid(name, &format!("expected one of {}", choices.join(", "))))?;
-            Ok(if name == "meetings.calendar.lead_minutes" {
-                let minutes: u8 = choice.parse().expect("lead choices are numbers");
-                debug_assert!(CALENDAR_LEAD_MINUTES.contains(&minutes));
-                Value::from(minutes)
-            } else if name == "labs.unload_idle_minutes" {
-                let minutes: u32 = choice.parse().expect("idle choices are numbers");
-                debug_assert!(crate::app_settings::UNLOAD_IDLE_MINUTES.contains(&minutes));
-                Value::from(minutes)
-            } else if name == "labs.keep_microphone_open_seconds" {
-                let seconds: u32 = choice.parse().expect("linger choices are numbers");
-                debug_assert!(crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS.contains(&seconds));
-                Value::from(seconds)
-            } else {
-                Value::String((*choice).into())
+            Ok(match key.kind {
+                Kind::NumberChoice(_) => {
+                    Value::from(choice.parse::<u32>().expect("number choices are numbers"))
+                }
+                _ => Value::String((*choice).into()),
             })
         }
         Kind::Text => Ok(Value::String(raw.into())),
@@ -837,6 +834,21 @@ mod tests {
     }
 
     #[test]
+    fn browser_origin_entries_keep_only_real_origins() {
+        let change = apply(
+            &AppSettings::default(),
+            "labs.api_browser_origins",
+            r#"["HTTPS://Example.com:443/", "*", "not an origin", "http://localhost:5173"]"#,
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.api_browser_origins,
+            vec!["https://example.com", "http://localhost:5173"]
+        );
+    }
+
+    #[test]
     fn ui_language_accepts_traditional_chinese_in_any_case() {
         for raw in ["zh-Hant", "zh-hant", "ZH_HANT"] {
             let change = apply(&AppSettings::default(), "ui_language", raw, &rules()).unwrap();
@@ -887,6 +899,41 @@ mod tests {
             .unwrap_err()
             .code,
             "invalid-value"
+        );
+    }
+
+    #[test]
+    fn a_voice_prompt_phrase_needs_two_words_and_six_letters() {
+        let change = apply(&AppSettings::default(), "labs.voice_prompt", "on", &rules()).unwrap();
+        assert!(change.settings.labs.voice_prompt);
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase,
+            crate::dictation::voice_prompt::DEFAULT_PHRASE
+        );
+        let change = apply(
+            &change.settings,
+            "labs.voice_prompt_phrase",
+            "  say it better ",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase, "say it better",
+            "a saved phrase is trimmed"
+        );
+        for (raw, reason) in [
+            ("rewrite", "two words"),
+            ("a b c", "six letters"),
+            ("", "two words"),
+        ] {
+            let error =
+                apply(&change.settings, "labs.voice_prompt_phrase", raw, &rules()).unwrap_err();
+            assert_eq!(error.code, "invalid-value", "{raw}");
+            assert!(error.message.contains(reason), "{raw}: {}", error.message);
+        }
+        assert_eq!(
+            change.settings.labs.voice_prompt_phrase, "say it better",
+            "a refused draft leaves the saved phrase"
         );
     }
 
@@ -1171,11 +1218,10 @@ mod tests {
         .unwrap();
         assert_eq!(cleared.settings.meetings.audio_retention, None);
         assert_eq!(
-            history.effects,
-            vec![Effect::HistoryRetention(
-                crate::history::HistoryRetention::Month
-            )]
+            history.settings.history_retention,
+            crate::history::HistoryRetention::Month
         );
+        assert!(history.effects.is_empty());
     }
 
     /// Issue 767: Menu alone (Caps Lock remapped to it) is a Linux
@@ -1250,6 +1296,18 @@ mod tests {
     }
 
     #[test]
+    fn enabling_tones_restores_a_nonzero_level() {
+        let settings = AppSettings {
+            sound_effects: false,
+            sound_effect_volume: 0.0,
+            ..Default::default()
+        };
+        let change = apply(&settings, "sound_effects", "true", &rules()).unwrap();
+        assert!(change.settings.sound_effects);
+        assert!(change.settings.sound_effect_volume > 0.0);
+    }
+
+    #[test]
     fn zero_volume_turns_tones_off_and_keeps_the_level() {
         let settings = AppSettings::default();
         let change = apply(&settings, "sound_effect_volume", "0", &rules()).unwrap();
@@ -1261,6 +1319,52 @@ mod tests {
         let change = apply(&change.settings, "sound_effect_volume", "0.25", &rules()).unwrap();
         assert!(change.settings.sound_effects);
         assert_eq!(change.settings.sound_effect_volume, 0.25);
+    }
+
+    /// The Labs card and the key's help are constants, so they can't be
+    /// formatted from the grace; this keeps them saying it.
+    #[test]
+    fn stop_when_call_ends_copy_names_the_grace() {
+        let grace = format!(
+            " {} s ",
+            crate::meeting::detection::AUTO_STOP_GRACE.as_secs()
+        );
+        let key = keys()
+            .find(|key| key.key == "labs.stop_when_call_ends")
+            .unwrap();
+        assert!(key.about.contains(&grace), "{}", key.about);
+        let card = crate::labs::Feature::StopWhenCallEnds.description();
+        assert!(card.contains(&grace), "{card}");
+    }
+
+    #[test]
+    fn number_choices_offer_exactly_what_settings_accept() {
+        let choices = |name: &str| {
+            let key = keys().find(|key| key.key == name).unwrap();
+            let Kind::NumberChoice(choices) = key.kind else {
+                panic!("{name} is a number choice");
+            };
+            choices
+                .iter()
+                .map(|choice| choice.parse::<u32>().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            choices("meetings.calendar.lead_minutes"),
+            crate::app_settings::CALENDAR_LEAD_MINUTES.map(u32::from)
+        );
+        assert_eq!(
+            choices("labs.unload_idle_minutes"),
+            crate::app_settings::UNLOAD_IDLE_MINUTES
+        );
+        assert_eq!(
+            choices("labs.keep_microphone_open_seconds"),
+            crate::app_settings::KEEP_MICROPHONE_OPEN_SECONDS
+        );
+        assert_eq!(
+            choices("labs.yolo_mode_seconds"),
+            crate::app_settings::YOLO_MODE_SECONDS
+        );
     }
 
     #[test]

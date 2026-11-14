@@ -38,10 +38,44 @@ pub fn vocabulary_biasing() -> bool {
     on(VOCABULARY_BIASING)
 }
 
+/// Names and terms visible in the focused window join one dictation's
+/// vocabulary, read once as the capture becomes real (macOS; read by the
+/// listener at its hold threshold, its control start, or the released
+/// microphone opening).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn screen_vocabulary() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    SCREEN_VOCABULARY.load(Ordering::Acquire) && Feature::ScreenVocabulary.on_this_os()
+}
+
 /// Mouse buttons may be recorded as shortcuts (macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_shortcuts() -> bool {
     on(MOUSE_SHORTCUTS)
+}
+
+/// The mode's OpenCode rewrite is given the text around the cursor as
+/// context, read once as the capture becomes real (macOS; read by the
+/// listener at its hold threshold, its control start, or the released
+/// microphone opening).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn cursor_context() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    CURSOR_CONTEXT.load(Ordering::Acquire) && Feature::CursorContext.on_this_os()
+}
+
+/// A finished Annotate capture copies to the clipboard as one light zip file
+/// rather than its image and summary (read where a written capture is copied).
+#[cfg_attr(not(hex_capture), allow(dead_code))]
+pub fn copy_capture_zip() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
@@ -81,6 +115,17 @@ pub fn spoken_symbols() -> bool {
 /// dictation's processing starts).
 pub fn filler_words() -> bool {
     on(FILLER_WORDS)
+}
+
+/// Labs › Clean up with Apple Intelligence: one on-device pass over each
+/// macOS dictation (read as each dictation's processing starts, and for the
+/// HUD's processing stage). The state word has no bit for it: its own atomic,
+/// written by `labs::apply`, and loaded here first in a process that never
+/// applied.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn clean_up() -> bool {
+    let _ = state();
+    CLEAN_UP.load(Ordering::Acquire) && Feature::CleanUpWithAppleIntelligence.on_this_os()
 }
 
 /// `hex meetings show --srt|--vtt` may export subtitles (read when the
@@ -319,6 +364,34 @@ pub fn print_start() -> bool {
     PRINT_START.load(Ordering::Acquire) && Feature::PrintStart.on_this_os()
 }
 
+/// A spoken trigger phrase inside a dictation turns what follows it into a
+/// one-off instruction for the mode's OpenCode model (read as each
+/// dictation's processing starts). An organization's
+/// DisableOpenCodeProcessing lock reads as off.
+pub fn voice_prompt() -> bool {
+    voice_prompt_under(crate::policy::Policy::current())
+}
+
+/// [`voice_prompt`] under an explicit policy, so its managed lock is read
+/// where the gate is tested.
+pub(crate) fn voice_prompt_under(policy: crate::policy::Policy) -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    VOICE_PROMPT.load(Ordering::Acquire)
+        && Feature::VoicePrompt.on_this_os()
+        && !policy.locks(crate::policy::Lock::OpenCodeProcessing)
+}
+
+/// The words that start a voice prompt (read as each dictation's processing
+/// starts, only while [`voice_prompt`] is on).
+pub fn voice_prompt_phrase() -> String {
+    VOICE_PROMPT_PHRASE
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -345,6 +418,54 @@ pub fn api_processing() -> bool {
 /// and returns the model's own times (read where each request's route starts).
 pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
+}
+
+/// The browser origins the local API answers with CORS, while Labs › Browser
+/// access to the local API is on (read as each request's `Origin` is
+/// checked). Empty turns every response back to what it was, without CORS.
+pub fn api_browser_origins() -> Vec<String> {
+    // A process that never applied its settings still loads its saved
+    // switches on the first read, as `screen_vocabulary` does.
+    let _ = state();
+    if !API_BROWSER_ACCESS.load(Ordering::Acquire) || !Feature::ApiBrowserAccess.on_this_os() {
+        return Vec::new();
+    }
+    API_BROWSER_ORIGINS
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// Labs › Smaller model files: your own speech model imports may use Q6_K,
+/// Q5_K, or Q4_K weights (macOS, where Metal has their kernels; read where an
+/// import's header is checked and where a saved selection loads).
+pub fn k_quant_models() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
+}
+
+/// Labs › YOLO mode: how long a shortcut dictation must be held
+/// for Return to follow its paste, or `None` while the lab is off (read as
+/// each dictation's output is committed).
+pub fn yolo_mode() -> Option<std::time::Duration> {
+    // The state word is full, so the lab has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    let seconds = YOLO_MODE_SECONDS.load(Ordering::Acquire);
+    (seconds > 0 && Feature::YoloMode.on_this_os())
+        .then(|| std::time::Duration::from_secs(u64::from(seconds)))
+}
+
+/// The apps Labs › YOLO mode sends in; empty means
+/// every app.
+pub fn yolo_mode_apps() -> Vec<String> {
+    let _ = state();
+    YOLO_MODE_APPS
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
 }
 
 /// Finished meetings may drop their WAV tracks on `meetings.audio_retention`

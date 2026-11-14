@@ -412,6 +412,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
+        "lab-clean-up",
         "lab-spoken-symbols",
         "lab-caps-lock-dictation",
     ] {
@@ -426,6 +427,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.filler_words);
     tap(&mut rt, "lab-filler-words");
     assert!(rt.state.settings.labs.filler_words);
+    assert!(!rt.state.settings.labs.clean_up_with_apple_intelligence);
+    tap(&mut rt, "lab-clean-up");
+    assert!(rt.state.settings.labs.clean_up_with_apple_intelligence);
     assert!(rt.find("lab-share-shortcut").is_none(), "Windows only");
     assert!(!rt.state.settings.labs.mouse_shortcuts);
     tap(&mut rt, "lab-mouse-shortcuts");
@@ -457,6 +461,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
+    assert!(rt.find("lab-clean-up").is_none(), "macOS only");
     assert!(rt.find("lab-spoken-symbols").is_some(), "every OS");
     assert!(!rt.state.settings.labs.keep_on_clipboard);
     tap(&mut rt, "lab-keep-on-clipboard");
@@ -1928,6 +1933,26 @@ fn voice_filter_sliders_set_the_filter_from_the_pointer() {
 }
 
 #[test]
+fn sound_volume_slider_sets_the_level_and_zero_turns_tones_off() {
+    let mut rt = runtime("mac-settings-advanced", true, (980.0, 1500.0));
+    let (x, y) = rt.find("sound-volume-slider/track").unwrap();
+    rt.pointer_down(x + 75.0, y);
+    rt.pointer_up(x + 75.0, y);
+    settle(&mut rt);
+    assert!(rt.state.settings.sound_effects);
+    assert_eq!(rt.state.settings.sound_effect_volume, 1.0);
+
+    rt.pointer_down(x - 75.0, y);
+    rt.pointer_up(x - 75.0, y);
+    settle(&mut rt);
+    assert!(!rt.state.settings.sound_effects);
+    assert_eq!(
+        rt.state.settings.sound_effect_volume, 1.0,
+        "keeps the level"
+    );
+}
+
+#[test]
 fn try_it_records_and_plays_through_the_host() {
     use platform::DemoRequest;
     let mut rt = runtime("mac-voice-filter", true, PANE_SIZE);
@@ -2070,6 +2095,8 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-live-text", settings.labs.live_text),
         ("lab-live-chapters", settings.labs.live_chapters),
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
+        ("lab-screen-vocabulary", settings.labs.screen_vocabulary),
+        ("lab-cursor-context", settings.labs.cursor_context),
         ("lab-return-to-app", settings.labs.return_to_app),
         ("lab-speakers-only", settings.labs.speakers_only),
         (
@@ -2092,6 +2119,8 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(rt.state.settings.labs.live_text);
     tap(&mut rt, "lab-vocabulary-biasing");
     assert!(rt.state.settings.labs.vocabulary_biasing);
+    tap(&mut rt, "lab-cursor-context");
+    assert!(rt.state.settings.labs.cursor_context);
     tap(&mut rt, "lab-meetings");
     assert!(rt.find("nav-meetings").is_none(), "hidden while off");
 
@@ -2101,6 +2130,8 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(rt.find("terminal-paste").is_none());
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
+    assert!(rt.find("lab-screen-vocabulary").is_none(), "macOS only");
+    assert!(rt.find("lab-cursor-context").is_none(), "macOS only");
     assert!(
         rt.find("lab-second-dictation-shortcut").is_some(),
         "the second dictation shortcut runs on Windows too"
@@ -2118,6 +2149,14 @@ fn labs_lists_every_toggle_off_by_default() {
     assert!(
         rt.find("lab-second-dictation-shortcut").is_some(),
         "the second dictation shortcut runs on Linux too"
+    );
+    assert!(
+        rt.find("lab-screen-vocabulary").is_none(),
+        "screen vocabulary is macOS only"
+    );
+    assert!(
+        rt.find("lab-cursor-context").is_none(),
+        "cursor context is macOS only"
     );
 }
 
@@ -2192,6 +2231,171 @@ fn a_labs_link_sets_the_stores_tab_chip_and_search() {
 }
 
 #[test]
+fn voice_prompt_shows_its_phrase_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::VoicePrompt.group()));
+    settle(&mut rt);
+    assert!(rt.find("voice-prompt-phrase").is_none(), "hidden while off");
+    tap(&mut rt, "lab-voice-prompt");
+    assert!(rt.state.settings.labs.voice_prompt);
+    assert!(rt.find("voice-prompt-phrase").is_some());
+    assert_eq!(
+        rt.state.lab_store.phrase.text,
+        crate::dictation::voice_prompt::DEFAULT_PHRASE,
+        "the field starts at the saved phrase"
+    );
+    let (field, _) = rt
+        .presented("voice-prompt-phrase")
+        .expect("the phrase field");
+    let (card, _) = rt.presented("lab-card-voice-prompt").expect("its card");
+    assert!(
+        field[0] + field[2] <= card[0] + card[2],
+        "the phrase field stays inside its card"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // the saved phrase working.
+    let saved = rt.state.settings.labs.voice_prompt_phrase.clone();
+    rt.update(|ui, _| ui.lab_store.phrase = rune::TextEdit::new("rewrite".to_string()));
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.voice_prompt_phrase, saved);
+    refresh(&mut rt);
+    assert!(rt.find("voice-prompt-phrase-error").is_some());
+
+    // A valid draft saves.
+    rt.update(|ui, _| {
+        ui.lab_store.phrase = rune::TextEdit::new("say it better".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.voice_prompt_phrase, "say it better");
+    refresh(&mut rt);
+    assert!(rt.find("voice-prompt-phrase-error").is_none());
+
+    // A phrase saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.voice_prompt_phrase = "say it clearer".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.phrase.text, "say it clearer");
+
+    // An invalid draft is dropped when another writer turns the lab off and
+    // back on, so it can't survive the toggle.
+    rt.update(|ui, _| ui.lab_store.phrase = rune::TextEdit::new("rewrite".to_string()));
+    let mut off = rt.state.settings.clone();
+    off.labs.voice_prompt = false;
+    assert!(rt.state.adopt(off.clone()));
+    let mut on = off;
+    on.labs.voice_prompt = true;
+    assert!(rt.state.adopt(on));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.phrase.text, "say it clearer");
+    assert!(rt.find("voice-prompt-phrase-error").is_none());
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-voice-prompt");
+    assert!(!rt.state.settings.labs.voice_prompt);
+    assert!(rt.find("voice-prompt-phrase").is_none());
+}
+
+#[test]
+fn browser_access_shows_its_origins_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(Feature::ApiBrowserAccess.group());
+    });
+    settle(&mut rt);
+    assert!(rt.find("api-browser-origins").is_none(), "hidden while off");
+    tap(&mut rt, "lab-api-browser-access");
+    assert!(rt.state.settings.labs.api_browser_access);
+    assert!(rt.find("api-browser-origins").is_some());
+    assert_eq!(rt.state.lab_store.origins.text, "", "nothing saved yet");
+
+    // The field saves what it holds, keeping only real origins, normalized.
+    rt.update(|ui, _| {
+        ui.lab_store.origins =
+            rune::TextEdit::new("HTTPS://Example.com/, http://localhost:5173, *, null".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        vec![
+            "https://example.com".to_string(),
+            "http://localhost:5173".to_string()
+        ]
+    );
+
+    // A list saved elsewhere updates the field in its normalized form, and
+    // reopening Labs shows it too.
+    let mut external = rt.state.settings.clone();
+    external.labs.api_browser_origins = vec![
+        "HTTPS://Other.example:443/".to_string(),
+        "not an origin".to_string(),
+    ];
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.origins.text, "https://other.example");
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-api-browser-access");
+    assert!(!rt.state.settings.labs.api_browser_access);
+    assert!(rt.find("api-browser-origins").is_none());
+
+    // A window that never opened the field (the lab was turned on by the
+    // CLI, say) leaves the saved list alone when another setting saves.
+    let mut untouched = runtime("mac-labs", true, (980.0, 2000.0));
+    untouched.state.settings.labs.api_browser_access = true;
+    untouched.state.settings.labs.api_browser_origins = vec!["https://saved.example".to_string()];
+    untouched.state.flush_drafts();
+    assert_eq!(
+        untouched.state.settings.labs.api_browser_origins,
+        vec!["https://saved.example".to_string()]
+    );
+}
+
+#[test]
+fn browser_access_keeps_its_typing_through_its_own_save() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(Feature::ApiBrowserAccess.group());
+    });
+    settle(&mut rt);
+    tap(&mut rt, "lab-api-browser-access");
+
+    // The saved list is normalized, but the field keeps exactly what was
+    // typed, so a later keystroke lands after the port rather than inside a
+    // rewritten origin.
+    rt.update(|ui, _| {
+        ui.lab_store.origins = rune::TextEdit::new("http://localhost:80".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        vec!["http://localhost".to_string()]
+    );
+    assert_eq!(rt.state.lab_store.origins.text, "http://localhost:80");
+
+    rt.update(|ui, _| {
+        ui.lab_store.origins =
+            rune::TextEdit::new("http://localhost:80, https://example.com,".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(
+        rt.state.settings.labs.api_browser_origins,
+        vec![
+            "http://localhost".to_string(),
+            "https://example.com".to_string()
+        ]
+    );
+    assert_eq!(
+        rt.state.lab_store.origins.text,
+        "http://localhost:80, https://example.com,"
+    );
+}
+
+#[test]
 fn a_labs_card_shows_its_description_and_its_switch_turns_it_on() {
     use crate::labs::Feature;
     let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
@@ -2217,10 +2421,40 @@ fn unload_when_idle_shows_its_minutes_on_its_card_while_on() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group()));
     settle(&mut rt);
-    assert!(rt.find("unload-idle-minutes").is_none(), "hidden while off");
+    assert!(
+        rt.find("unload-idle-minutes-trigger").is_none(),
+        "hidden while off"
+    );
     tap(&mut rt, "lab-unload-idle");
     assert!(rt.state.settings.labs.unload_idle);
-    assert!(rt.find("unload-idle-minutes").is_some());
+    assert!(rt.find("unload-idle-minutes-trigger").is_some());
+}
+
+/// At the window's smallest size, in a longer language, the minutes stay
+/// inside their card and the last choice is still reachable.
+#[test]
+fn unload_after_fits_its_card_in_a_small_translated_window() {
+    let mut rt = runtime("mac-labs", true, (860.0, 560.0));
+    crate::desktop::i18n::apply(Some("de"));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(crate::labs::Feature::UnloadIdle.group());
+        ui.settings.labs.unload_idle = true;
+    });
+    settle(&mut rt);
+    let (control, _) = rt
+        .presented("unload-idle-minutes-trigger")
+        .expect("the minutes' control");
+    let (card, _) = rt.presented("lab-card-unload-idle").expect("its card");
+    assert!(
+        control[0] >= card[0] && control[0] + control[2] <= card[0] + card[2],
+        "the minutes' control stays inside its card: {control:?} in {card:?}"
+    );
+    tap(&mut rt, "unload-idle-minutes-trigger");
+    tap(&mut rt, "option3");
+    assert_eq!(
+        rt.state.settings.labs.unload_idle_minutes,
+        crate::app_settings::UNLOAD_IDLE_MINUTES[3]
+    );
 }
 
 #[test]
@@ -2343,6 +2577,28 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
     settle(&mut rt);
     assert!(rt.find("empty-copy").is_some());
     assert!(rt.find("lab-card-live-text").is_none());
+}
+
+#[test]
+fn the_labs_search_clear_button_empties_the_field_and_brings_every_card_back() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    unfold_labs(&mut rt);
+    rt.update(|ui, _| ui.lab_store.search = rune::TextEdit::new("live text".to_string()));
+    settle(&mut rt);
+    assert!(rt.find("lab-card-live-text").is_some());
+    assert!(
+        rt.find("lab-card-mouse-shortcuts").is_none(),
+        "the search filters"
+    );
+    tap(&mut rt, "labs-search/action");
+    assert!(
+        rt.state.lab_store.search.text.is_empty(),
+        "the clear button empties the field"
+    );
+    assert!(
+        rt.find("lab-card-mouse-shortcuts").is_some(),
+        "and the filtered-out cards come back"
+    );
 }
 
 #[test]
@@ -2692,6 +2948,122 @@ fn ducking_goldens() {
     check_golden("mac-settings-permissions", true, PANE_SIZE);
     check_golden("mac-settings-advanced", false, PANE_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
+}
+
+/// Labs › Live typing says when this desktop has no input method to use, and
+/// refuses to turn on; where it is offered it turns on as usual.
+#[test]
+fn live_typing_says_when_the_desktop_cannot_use_it() {
+    let mut rt = runtime("linux-labs", false, PANE_SIZE);
+    rt.state.platform.live_typing_unsupported = true;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    tap(&mut rt, "lab-live-typing");
+    assert!(
+        !rt.state.settings.labs.live_typing,
+        "the switch stays off where it can't work"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop doesn't offer the input method")),
+        "its card says why"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Show provisional words in the focused text field")),
+        "its description stays under the note"
+    );
+
+    // Already on, it can still be turned off.
+    rt.state.settings.labs.live_typing = true;
+    refresh(&mut rt);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("This desktop doesn't offer the input method")),
+        "the note stays while it's on"
+    );
+    tap(&mut rt, "lab-live-typing");
+    assert!(!rt.state.settings.labs.live_typing);
+
+    // A compositor that offers the input method turns it on.
+    rt.state.platform.live_typing_unsupported = false;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-live-typing");
+    assert!(rt.state.settings.labs.live_typing);
+}
+
+/// Labs › Clean up with Apple Intelligence says why Apple Intelligence can't
+/// run here, locks its switch while it is off, and still turns off once on.
+#[test]
+fn clean_up_says_why_apple_intelligence_cannot_run() {
+    use crate::rune_ui::platform::NotesAvailability;
+    // Tall enough that the Output group's cards sit inside the window, where
+    // a tap reaches their switches.
+    let mut rt = runtime("mac-labs", true, (980.0, 2400.0));
+    rt.state.platform.notes = NotesAvailability::NotEnabled;
+    refresh(&mut rt);
+    open_labs(&mut rt);
+    assert!(rt.find("lab-clean-up").is_some());
+    tap(&mut rt, "lab-clean-up");
+    assert!(
+        !rt.state.settings.labs.clean_up_with_apple_intelligence,
+        "the switch stays off where it can't work"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
+        "its card says why"
+    );
+
+    // Already on, it can still be turned off.
+    rt.state.settings.labs.clean_up_with_apple_intelligence = true;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-clean-up");
+    assert!(!rt.state.settings.labs.clean_up_with_apple_intelligence);
+
+    // This Mac has Apple Intelligence: the switch turns on.
+    rt.state.platform.notes = NotesAvailability::Available;
+    refresh(&mut rt);
+    tap(&mut rt, "lab-clean-up");
+    assert!(rt.state.settings.labs.clean_up_with_apple_intelligence);
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence in System Settings")),
+        "no note while it can run"
+    );
+}
+
+/// An organization's lock keeps the cleanup card off, disabled, and saying
+/// so, instead of its Apple Intelligence note, whatever this Mac can run.
+#[test]
+fn a_managed_lock_holds_the_cleanup_lab_off() {
+    use crate::policy::{Lock, Policy};
+    let _locked = Policy::forced_for_test(Policy::default().with(Lock::Labs));
+    let mut rt = runtime("mac-labs", true, (980.0, 2400.0));
+    open_labs(&mut rt);
+    assert!(rt.find("lab-clean-up").is_some(), "the card still lists");
+    tap(&mut rt, "lab-clean-up");
+    assert!(
+        !rt.state.settings.labs.clean_up_with_apple_intelligence,
+        "a locked switch never turns on"
+    );
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Managed by your organization"),
+        "its row says why"
+    );
+    assert!(
+        !texts(&rt)
+            .iter()
+            .any(|text| text.starts_with("Turn on Apple Intelligence")),
+        "the Apple Intelligence note would replace the lock's words"
+    );
 }
 
 #[test]

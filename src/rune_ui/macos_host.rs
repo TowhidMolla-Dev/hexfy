@@ -39,7 +39,8 @@ use crate::desktop::host::DesktopAction;
 use crate::desktop::i18n::tr;
 use crate::desktop::login_item::{LoginItemFailure, LoginItemRequest, LoginItemWorker};
 use crate::desktop::onboarding::{
-    Input, PermissionAction, PermissionKind, PermissionState, StalePermissionTracker,
+    Input, PermissionAction, PermissionKind, PermissionState, ReturnFromSettings,
+    StalePermissionTracker,
 };
 use crate::macos_rune::RuntimeHandle;
 pub(super) use crate::macos_rune::{Request, ShortcutTarget};
@@ -111,9 +112,16 @@ impl Backend {
 
     /// Saves `settings.json`, then asks the runtime to reload it. The
     /// listener follows the saved file itself.
-    pub(super) fn save(&mut self, settings: &crate::app_settings::AppSettings) -> Result<()> {
-        settings.save()?;
-        self.send(Request::ReloadSettings)
+    pub(super) fn save(
+        &mut self,
+        base: &crate::app_settings::AppSettings,
+        settings: &crate::app_settings::AppSettings,
+    ) -> Result<crate::app_settings::AppSettings> {
+        let saved = base.update(settings)?;
+        if let Err(error) = self.send(Request::ReloadSettings) {
+            tracing::warn!(%error, "settings saved but runtime reload could not be queued");
+        }
+        Ok(saved)
     }
 
     pub(super) fn quit(&mut self) {
@@ -321,9 +329,12 @@ impl ChordCapture {
         // Function and navigation keys type nothing, so one may be a shortcut
         // alone. The section key does type something, but the recorder takes it
         // alone too: `settings::validate` refuses it while Labs › Section key
-        // alone is off, as Linux's recorder does.
-        let stands_alone =
-            is_function_key(&key.label) || is_navigation_key(code) || key.is_section();
+        // alone is off, as Linux's recorder does. Plain ⌫ turns an optional
+        // shortcut off, and `settings::validate` refuses it as a binding.
+        let stands_alone = is_function_key(&key.label)
+            || is_navigation_key(code)
+            || key.is_section()
+            || key.is_erase();
         if modifiers.is_empty() && !stands_alone {
             return Some(Chord::Captured(Err(tr("Add a modifier"))));
         }
@@ -596,6 +607,8 @@ struct MacHost {
     /// Tracks System Settings return timing for Accessibility, System Audio,
     /// and Screen Recording.
     stale: [StalePermissionTracker; 3],
+    /// Brings Hex back once an asked permission is granted in System Settings.
+    returning: ReturnFromSettings,
     /// In-flight `"Still grey? Fix it"` resets, indexed by [`stale_slot`].
     resetting: [bool; 3],
     reset_tx: mpsc::Sender<PermissionKind>,
@@ -622,6 +635,7 @@ impl MacHost {
             folder_choice: None,
             calendar: CalendarFeed::default(),
             stale: Default::default(),
+            returning: ReturnFromSettings::default(),
             resetting: [false; 3],
             reset_tx,
             reset_rx,
@@ -931,14 +945,12 @@ impl NativeHost for MacHost {
         });
         changed |= state.permissions_asked.len() != asked_len;
         let now = Instant::now();
-        let focus = self
-            .stale
-            .iter()
-            .any(StalePermissionTracker::is_waiting)
-            .then(crate::desktop::permission_guide::settings_focus)
-            .unwrap_or_default();
+        let focus = (self.returning.is_pending()
+            || self.stale.iter().any(StalePermissionTracker::is_waiting))
+        .then(crate::desktop::permission_guide::settings_focus)
+        .unwrap_or_default();
         let mut next_stale = Vec::new();
-        for (slot, (kind, untrusted)) in [
+        for (kind, untrusted) in [
             (
                 PermissionKind::Accessibility,
                 matches!(
@@ -957,13 +969,20 @@ impl NativeHost for MacHost {
                     false
                 }
             }),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        ] {
+            let Some(slot) = stale_slot(kind) else {
+                continue;
+            };
+            if !untrusted && self.stale[slot].is_waiting() {
+                self.returning.note_granted(now);
+            }
             if !self.resetting[slot] && self.stale[slot].poll(now, untrusted, focus) {
                 next_stale.push(kind);
             }
+        }
+        if self.returning.poll(now, focus) {
+            tracing::info!("permission granted in System Settings; bringing Hex back");
+            crate::macos_rune::bring_window_forward();
         }
         changed |= update(&mut state.permissions_stale, next_stale);
         changed |= update(&mut state.login_item_checking, self.login_checking);
@@ -1262,8 +1281,10 @@ fn upcoming_meeting(meeting: &crate::calendar::CalendarMeeting, now_ms: i64) -> 
 fn save_calendar_connected() -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     settings.meetings.calendar.connected = true;
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     match crate::macos_rune::runtime() {
         Some(runtime) => runtime
             .send(Request::ReloadSettings)
@@ -1382,8 +1403,10 @@ impl ScrawlHost {
 fn save_settings(change: impl FnOnce(&mut crate::app_settings::AppSettings)) -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     change(&mut settings);
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     if let Some(runtime) = crate::macos_rune::runtime() {
         runtime
             .send(Request::ReloadSettings)
@@ -1396,8 +1419,10 @@ fn save_settings(change: impl FnOnce(&mut crate::app_settings::AppSettings)) -> 
 fn save_meetings_folder(folder: PathBuf) -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
+    let base = settings.clone();
     settings.meetings.output_folder = Some(folder);
-    settings.save().map_err(|error| format!("{error:#}"))?;
+    base.update(&settings)
+        .map_err(|error| format!("{error:#}"))?;
     if let Some(runtime) = crate::macos_rune::runtime() {
         runtime
             .send(Request::ReloadSettings)
@@ -1809,6 +1834,20 @@ mod tests {
         assert_eq!(single_key_character(Some("ab")), None);
         assert_eq!(single_key_character(Some("\u{0}")), None);
         assert_eq!(single_key_character(None), None);
+    }
+
+    /// Plain ⌫ and Forward Delete reach the window, which turns an optional
+    /// shortcut off with them; with a modifier they record as usual.
+    #[test]
+    fn delete_records_alone_for_the_window_to_turn_a_shortcut_off() {
+        let mut capture = ChordCapture::default();
+        for (code, flags) in [(51, 0), (117, FUNCTION)] {
+            let binding = captured(capture.key_down(code, false, None, flags)).unwrap();
+            assert!(binding.is_bare_erase(), "{code}");
+        }
+        let with_command = captured(capture.key_down(51, false, None, LEFT_COMMAND)).unwrap();
+        assert!(!with_command.is_bare_erase());
+        assert_eq!(with_command.modifiers.command, Some(ModifierSide::Either));
     }
 
     fn calendar_answer(granted: bool, status: CalendarAccess) -> AccessAnswer {

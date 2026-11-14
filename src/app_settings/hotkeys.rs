@@ -402,6 +402,16 @@ impl HotkeyKey {
         MOUSE_INPUT_CODES.contains(&self.code)
     }
 
+    /// ⌫ (Backspace) or Delete: macOS's Delete and Forward Delete key codes,
+    /// elsewhere the named keys.
+    pub fn is_erase(&self) -> bool {
+        if cfg!(target_os = "macos") {
+            matches!(self.code, 51 | 117)
+        } else {
+            matches!(self.name().as_str(), "backspace" | "delete")
+        }
+    }
+
     /// A key identified by name on Windows and Linux.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn named(name: &str) -> Self {
@@ -943,6 +953,12 @@ impl HotkeyBinding {
             })
     }
 
+    /// ⌫ or Delete with no modifier: the recorder's gesture for turning a
+    /// shortcut off, never a shortcut itself.
+    pub fn is_bare_erase(&self) -> bool {
+        self.modifiers.is_empty() && self.key.as_ref().is_some_and(HotkeyKey::is_erase)
+    }
+
     /// What the input layers match. On macOS a letter key follows its
     /// letter: its keycap shows the letter, so it matches the key that types
     /// it on the layout published now, and keeps its recorded key when the
@@ -1352,9 +1368,12 @@ pub struct RuntimeHotkeys {
 }
 
 impl RuntimeHotkeys {
+    /// The shortcuts [`Self::all`] lists by name, before the extra rows.
+    const NAMED: usize = 8;
+
     /// Every shortcut Hex matches, for suppression and chord evidence.
-    pub fn all(self) -> [Option<RuntimeHotkey>; 8 + MAX_EXTRA_DICTATION_SHORTCUTS] {
-        let named = [
+    pub fn all(self) -> [Option<RuntimeHotkey>; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS] {
+        let named: [_; Self::NAMED] = [
             Some(self.dictation),
             self.paste_last,
             self.paste_meeting,
@@ -1364,7 +1383,7 @@ impl RuntimeHotkeys {
             self.typed_text,
             self.second_dictation,
         ];
-        let mut all = [None; 8 + MAX_EXTRA_DICTATION_SHORTCUTS];
+        let mut all = [None; Self::NAMED + MAX_EXTRA_DICTATION_SHORTCUTS];
         all[..named.len()].copy_from_slice(&named);
         all[named.len()..].copy_from_slice(&self.extra_dictation);
         all

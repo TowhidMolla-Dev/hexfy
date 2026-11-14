@@ -320,9 +320,10 @@ impl Pump {
     /// an open window adopt it.
     fn edit_vocabulary(&mut self, command: &ControlCommand) -> Result<ControlReply, ControlError> {
         let mut settings = load()?;
+        let base = settings.clone();
         let reply = control::edit_vocabulary(&mut settings.vocabulary, command)?;
         if matches!(reply, ControlReply::Done { changed: true, .. }) {
-            settings.save().map_err(|error| {
+            base.update(&settings).map_err(|error| {
                 ControlError::new("internal", format!("couldn't save: {error:#}"))
             })?;
             let _ = self.runtime.send(Request::ReloadSettings);
@@ -446,23 +447,15 @@ impl Pump {
         if !change.changed(before) {
             return Ok(ControlReply::unchanged(unchanged()));
         }
-        change
-            .settings
-            .save()
+        before
+            .update(&change.settings)
             .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
         let _ = self.runtime.send(Request::ReloadSettings);
         for effect in change.effects {
             match effect {
-                settings::Effect::HistoryRetention(retention) => {
-                    if let Some(history) = self.runtime.history()
-                        && let Err(error) = history.set_retention(retention)
-                    {
-                        tracing::warn!(%error, "could not apply history retention");
-                    }
-                }
                 // An open window keeps the Dock icon; closing it applies this.
                 settings::Effect::DockIcon if !window_visible() => {
-                    crate::app_settings::set_dock_icon_visible(
+                    crate::macos_rune::set_dock_icon_visible(
                         crate::app_settings::dock_icon_visible(
                             change.settings.show_dock_icon,
                             crate::macos_rune::status_item::installed(),
@@ -921,9 +914,7 @@ fn status(
     };
     let open = window.is_visible();
     let settings = &published.settings;
-    let selection = &settings.transcription;
-    let definition = crate::transcription::models::definition(selection.model);
-    let setup = crate::desktop::onboarding::status(selection);
+    let setup = crate::desktop::onboarding::status(&settings.transcription);
     Ok(ControlReply::Status(Box::new(StatusReport {
         app_version: crate::VERSION.into(),
         pid: std::process::id(),
@@ -933,23 +924,20 @@ fn status(
             status: if microphone_unavailable {
                 "No microphone".into()
             } else {
-                published.listener.status.clone()
+                published.listener.status.to_string()
             },
             shortcuts: Vec::new(),
         },
         capture,
         meeting,
         model: ModelReport {
-            id: selection.model.as_str().into(),
-            name: definition.name.into(),
-            language: selection.language.clone(),
-            installed: crate::transcription::models::is_installed(definition, &selection.language),
             preparing: published
                 .preparation
                 .model
                 .map(|model| model.as_str().into()),
             downloaded_bytes: published.preparation.downloaded_bytes,
             error: published.preparation.error.clone(),
+            ..ModelReport::saved(&settings.transcription)
         },
         features: FeatureReport {
             meetings: crate::app_settings::meetings_enabled(),
@@ -977,7 +965,7 @@ fn status(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
@@ -991,7 +979,8 @@ mod tests {
             move |selection: &TranscriptionSelection,
                   installed_only: bool,
                   _: &AtomicBool,
-                  _: &AtomicU64| {
+                  _: &AtomicU64,
+                  _: &AtomicU8| {
                 let _ = sender.send((selection.clone(), installed_only));
                 Ok(())
             },

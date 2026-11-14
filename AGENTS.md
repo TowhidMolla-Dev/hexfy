@@ -35,17 +35,27 @@ user-requested features land in Labs, off by default, not on by default.**
 Labs has no master switch; Settings › Labs lists every lab this OS has as a
 card (name, description, toggle), each off by default, under one collapsible
 header per group (Dictation, Output, History, Meetings, Annotate, Shortcuts,
-Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each feature has an audience: `Everyone` or `Dev` (dev, local, test, and
-dev-channel builds only; a stable build never lists, accepts, or runs it).
-A feature with its own pane joins the sidebar as a normal item while
-on and is hidden while off; a behaviour-only feature is just its toggle. Today:
-Meetings (beta), Voice Filter (Dev; locked on while its macOS driver is
-installed, and a stable build with the driver keeps its pane for Uninstall
-alone), Playground (Dev), Live text, Live chapters, Vocabulary biasing, Switch
-model with keyboard language (#216), Mouse shortcuts (#209, macOS), Also
-pause the browser (#301, macOS), Share dictation shortcut (#176, Windows),
-Unload model when idle (#442), Terminal paste (Windows), and Terminal paste
-shortcut (Windows, Linux). Externally contributed features land there too.
+Models; `labs::Feature::group`), plus Send feedback and Run setup again. Each
+feature has an audience: `Everyone` or `Dev` (dev, local, test, and
+dev-channel builds only; a stable build never lists, accepts, or runs it). A
+feature with its own pane joins the sidebar as a normal item while on and is
+hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
+(beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
+a stable build with the driver keeps its pane for Uninstall alone), Playground
+(Dev), Live text, Live chapters, Vocabulary biasing, Screen vocabulary
+(macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
+language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
+macOS), Share dictation shortcut (#176, Windows), Unload model when idle
+(#442), Smaller model files (macOS), Terminal paste (Windows), and Terminal
+paste shortcut (Windows, Linux). Externally contributed features land there
+too.
+Every `Everyone` lab also gets a page on Hex's website,
+`anoma.ly/hex/labs/<id>` (index at `/hex/labs`), built from
+`site/src/labs.json`, which `labs::web`'s test generates from the registry
+(`Feature::title`, `summary`, `group`, `oses`, `added`). Adding or changing a
+lab means running `HEX_UPDATE_LABS_JSON=1 scripts/check labs::web` and
+committing the JSON; the test fails until you do, and the site build turns it
+into the page and its social card.
 Annotate is a normal feature in every build, stable included, on macOS,
 Linux, and Windows; only developer tools (`dev_build::is_dev_build()` with
 `DEVELOPER_FEATURES_ENABLED`) stay gated to dev builds.
@@ -186,7 +196,8 @@ substitute for source inspection or a second roadmap.
   Orukeet).
 - `transcription/custom_models`, `transcription/gguf_header`: your own speech
   models: GGUF imports checked from their header alone (family, variant,
-  languages, F32/F16/Q8_0 tensors), copied into `models/custom/` under their
+  languages, F32/F16/Q8_0 tensors, plus Q4_K/Q5_K/Q6_K under Labs › Smaller
+  model files on macOS), copied into `models/custom/` under their
   SHA-256 with a receipt and manifest (or recorded in place for a found file),
   `TranscriptionModelId::Custom` IDs, and the default-model fallback for an
   import that can't run.
@@ -238,7 +249,8 @@ substitute for source inspection or a second roadmap.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
 - `accessibility`: bounded focused-window and selected-text capture through
-  Accessibility without touching the clipboard.
+  Accessibility without touching the clipboard, including the bounded visible
+  window text Labs › Screen vocabulary reads (macOS).
 - `recognition`: the macOS listener coordinator for hotkey and programmatic
   dictation controls, workers, and observations. It does not own the
   authoritative microphone timeline.
@@ -298,6 +310,12 @@ substitute for source inspection or a second roadmap.
 - `app_paths`: the Application Support owner (`hex` on every OS) for runtime
   logs and shared state. The logs folder and its files are owner-only on
   Unix (0700/0600, tightened when an older Hex left them open).
+  `desktop/log_trim` keeps `live.ndjson` and `process.log` under 10 MB each:
+  at launch and hourly, under a lock file, it drops a log's oldest lines in
+  place to its newest 5 MB (never a rename, since every Hex process appends to
+  the same files), and once clears both logs from before they kept personal
+  text out. `EventReader` starts over when a log's first bytes change, so a
+  trim under an open reader never leaves it reading moved records.
 - `desktop/onboarding`, `desktop/permission_guide`: required permission health, the native
   floating System Settings guide, selected dictation-model installation, the
   release startup gate, and opt-in command-model setup.
@@ -500,7 +518,7 @@ substitute for source inspection or a second roadmap.
   prevention while recording, and reveal and Trash.
 - `meeting/capture`: independent self-healing microphone (cpal) and system
   audio sources (macOS: Core Audio process tap, ScreenCaptureKit fallback;
-  Linux: `pw-record` of the default output's monitor; Windows: WASAPI
+  Linux: one `pw-record` per hardware sink's monitor, mixed; Windows: WASAPI
   loopback); one failing never stops the other, and resumed audio is padded
   onto the timeline.
 - `meeting/runtime`: the Linux and Windows apps' meeting controller thread,
@@ -559,7 +577,8 @@ substitute for source inspection or a second roadmap.
   its own thread. Answers on a channel; cancel and a dialog that never opened
   read as nothing chosen.
 - `labs`: the Labs feature registry (`labs::Feature`: name, settings key,
-  description, audience, group), the runtime gates (`labs::live_text`, `live_chapters`,
+  description, the card's title and line, audience, group, OSes), the
+  website's `site/src/labs.json` (`labs::web`), the runtime gates (`labs::live_text`, `live_chapters`,
   `playground`, `vocabulary_biasing`, `mouse_shortcuts`), and
   `hex labs [on|off <feature>]`. `dev_build`: whether this is a dev, local, test,
   or dev-channel build.
@@ -754,17 +773,34 @@ CoreAudio formats, AppleScript details, or event serialization.
   always finish. Hex takes the key only while a toggled recording runs, and
   then keeps it (repeats and release included) from the app in front; idle,
   and always in Hold mode, it stays with every app. macOS suppresses it in
-  the session tap only while the listener arms it (`set_takes_cancel`),
+  the session tap only while the listener arms it (`set_cancel`),
   Windows' hook only while its capture records, and X11 grabs it only for
   the recording. A shortcuts portal holds a key for as long as Hex runs, so
   on Wayland Hex binds nothing for it and Settings says to bind
-  `hex dictation cancel` in the desktop. `hex dictation cancel` discards
-  whatever records, in any mode. Hold mode has no cancel: Escape ends no
-  capture there, not even as a chord, except a Labs › Caps Lock dictation
-  capture, whose own machine always cancels on Escape. Every other intentional
-  dictation finishes and pastes; only short taps, chords, and silent captures
-  discard, and Hex itself ends a capture only when its input or microphone is
-  lost.
+  `hex dictation cancel` discards
+  whatever records, in any mode. Hold mode has no cancel shortcut, with one
+  exception on macOS: Escape pressed while the shortcut is still held, once
+  the hold threshold (300 ms) made the press Hex's, cancels that capture with
+  any modifiers down, and the session tap keeps that Escape from the app
+  (`DictationHotkey::takes_escape`). Before the threshold Escape is
+  Option-Escape and passes through; a hands-free (locked) Hold capture never
+  takes Escape, which may be meant for the app in front (#786). An Escape a
+  recording machine ignores logs `Escape ignored while recording` with why.
+  Escape is never a chord. A Labs › Caps Lock dictation capture's own machine
+  always cancels on Escape. Every other intentional dictation finishes and
+  pastes; only short taps, chords, and silent captures discard, and Hex
+  itself ends a capture only when its input or microphone is lost.
+- Return (and keypad Enter) pressed while a macOS modifier-only Hold shortcut
+  is held past the hold threshold is not a chord: the capture goes on, and
+  the key reaches the app. Any other key joining it still discards it at any
+  time, so another app's global Option-key shortcut (Spaceman's Option-1)
+  never leaves a dictation running.
+- Labs › YOLO mode on macOS: an Escape the listener sees after a sending
+  dictation's release (from its submission, so the 200 ms tail counts) and
+  before its Return skips the Return; the text still pastes and History
+  records a dictation, not a send. Return waits until
+  `yolo_mode::ESCAPE_WINDOW` (500 ms) after submission and `SETTLE` after the
+  paste, whichever is later. Windows and Linux press Return without the window.
 - A dictation discarded for silence (level under the silence threshold, or no
   speech the detector hears) is discarded quietly on every OS: no error tone,
   no note, nothing in Settings. The log keeps the measured level and peak
@@ -1084,11 +1120,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   can replace; after Stop they read the final transcript.
 - Meeting system audio uses a Core Audio process tap on macOS (System Audio
   Recording consent), never requiring a display; ScreenCaptureKit is only the
-  fallback. Linux records the default output's PipeWire monitor through
-  `pw-record` and Windows its WASAPI loopback; neither asks for consent.
-  Losing either source never stops the other or the meeting: it retries until
-  Stop, and resumed audio is padded with silence so WAV positions stay on the
-  shared capture clock.
+  fallback. Linux records every hardware output's PipeWire monitor through one
+  `pw-record` each, mixed, and Windows its WASAPI loopback; neither asks for
+  consent. Losing either source never stops the other or the meeting: it
+  retries until Stop, and resumed audio is padded with silence so WAV
+  positions stay on the shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
 - Meeting notes (Apple Intelligence, or OpenCode only once the user turns on
