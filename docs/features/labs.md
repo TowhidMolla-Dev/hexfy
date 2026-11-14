@@ -19,7 +19,33 @@ is no master switch. **Labs** is always the last item in the sidebar (Up and
 Down reach it from the last pane; pressing it while it shows keeps it open) and
 lists every Labs feature this OS has as a card (name, one-line description, toggle)
 under its group's collapsible header, each **off by default**, plus Send
-feedback and Run setup again.
+feedback and Run setup again. A card's title and line are
+`labs::Feature::title` and `summary` (`src/labs/card.rs`), translated by the
+window, and its OSes `labs::Feature::oses`.
+
+**On the web.** Every `Everyone` lab (not Dev ones, nor Screenshots, Annotate
+15 s replay, or Copy captures as a zip, which only builds with the capture
+build option have) has a page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
+the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
+card. The pages come from `site/src/labs.json`, which only the registry
+writes:
+
+```ts
+Add or change a lab
+├── HEX_UPDATE_LABS_JSON=1 scripts/check labs::web -> rewrites site/src/labs.json from Feature::ALL
+├── commit it               -> labs::web's test fails while the JSON is stale
+└── push to dev (site/**)   -> the dev site's build writes labs/<id>.html, labs/<id>.png, labs.html, and the sitemap entries
+Page
+├── Open in Hex             -> hex://labs/<id> (Mac labs only: only the Mac app registers hex://)
+├── Get Hex                 -> the home page when the stable release's src/labs.rs names the lab,
+│                              else Get Hex Dev (/hex/download/dev, and dev links for its other OSes)
+└── hex labs on <id>        -> the same switch from a terminal, every OS
+```
+
+Checks: `labs::web` (Rust, the JSON and which labs it leaves out),
+`every_lab_card_string_has_every_language` (i18n), and `site/labs.test.ts`
+(`bun test`: links, meta, order). The site's build runs in the deploy only,
+not on pull requests; the live page is unverified until a deploy.
 
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
@@ -27,14 +53,16 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Voice Filter (Dev) yes experimental.hex_microphone (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
-├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating
+├── Live text       no    labs.live_text                         provisional words beside the HUD while dictating; its card says when the selected speech model can't stream (Linux: or Speech engine is CPU), so no words would show
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
-├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted
+├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Settings search no    labs.settings_search                  a search field atop General filters its rows, Advanced's included
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the onboarding HUD preview and the Sounds sheet's HUD replay inside the window, and every overlay window, keep following the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary biasing no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
+├── Screen vocabulary no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
+├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
 ├── Switch model with app no  labs.app_model_switching       (macOS, Windows)
@@ -50,14 +78,34 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep mic open after dictating no labs.keep_microphone_open + labs.keep_microphone_open_seconds (30/60/180/300/1800, default 60)
 │                                        with Turn off the mic when not dictating on, the microphone stays open for that
 │                                        long after a capture, so the next dictation starts at once
-├── Restore shortcut default no labs.restore_shortcut_default   Paste last dictation's row offers its default back (#613)
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
+├── YOLO mode no labs.yolo_mode (every OS) a shortcut dictation held at least its chosen time (2 s default), in one of its chosen apps if any, presses Return after its paste unless Escape came after the release (macOS); History records it as Send
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
 ├── Print-only CLI dictation no labs.print_start        (macOS)   hex dictation start --print answers with the transcript however the recording ends; never pasted or copied
+├── Voice prompt    no    labs.voice_prompt + labs.voice_prompt_phrase ("rewrite this", every OS)
+│                                        a spoken phrase inside a dictation hands the mode's OpenCode model a one-off
+│                                        instruction for that dictation; without one, processing is unchanged
+│                                        // checks: the tests in dictation/voice_prompt.rs (whole-word matching, the last
+│                                        // occurrence, the outcome table, phrase validation); a_spoken_instruction_replaces_
+│                                        // the_rewrite_and_carries_context and a_voice_prompt_with_nothing_to_ask_pastes_
+│                                        // nothing_and_runs_no_transformations (dictation/processor.rs);
+│                                        // voice_prompt_is_its_own_atomic_and_carries_its_phrase (labs.rs);
+│                                        // a_voice_prompt_phrase_needs_two_words_and_six_letters (control/settings.rs);
+│                                        // an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch
+│                                        // (app_settings/persistence/tests.rs); voice_prompt_shows_its_phrase_on_its_card_while_on
+│                                        // (rune_ui/tests/panes.rs); not observed with a real dictation, and no request
+│                                        // ran against a live model
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
+├── Clean up with Apple Intelligence no labs.clean_up_with_apple_intelligence (macOS)
+│                                        one short on-device pass after the corrections fixes clearly misheard words and
+│                                        resolves spoken self-corrections ("tuesday, no wait, wednesday" → "wednesday");
+│                                        a mode that rewrites with OpenCode keeps its model, numbers-only dictations are
+│                                        left alone, and an unavailable, late, refused, or over-reaching answer pastes the
+│                                        corrected text; its card says why Apple Intelligence can't run here, and the
+│                                        switch still turns off
 ├── Subtitle export no    labs.subtitle_export         (macOS)   hex meetings show --srt|--vtt writes a meeting as timed subtitles (#633)
 ├── Second dictation shortcut no labs.second_dictation_shortcut + second_dictation_hotkey
 │                                        another shortcut dictates like the main one (#627); General shows its recorder while on
@@ -83,7 +131,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Stop when the call ends no labs.stop_when_call_ends (macOS) a recording Hex started on its own stops 30 s after its call app leaves the microphone and goes quiet (#835)
 ├── More call apps no    labs.more_call_apps             (every OS with Meetings) Signal, Telegram, WeChat, LINE, Webex, Element, and Phone calls are offered,
-│                                        and calls on Google Voice, Messenger, Teams, FaceTime, GroupMe, and Webex pages are named
+│                                        and calls on Google Voice, Messenger, FaceTime, GroupMe, and Webex pages are named
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
 ├── Process API transcripts no labs.api_processing       (every OS) apps using Hex's local API can add process=global to
 │                                        POST /transcriptions and POST /streams/{id}/finish to get the text after Global
@@ -98,20 +146,48 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: local_api::timestamps (parse, 403 before the body, response fields,
 │                                        // clamping, empty arrays), transcription::service (the 422 decision), and
 │                                        // gguf_session (chunk offsets); no real-model transcript with times
+├── Browser access to the local API no labs.api_browser_access + labs.api_browser_origins (every OS)
+│                                        a web page served from one of the listed origins can call Hex's local API with
+│                                        fetch: its unauthenticated OPTIONS preflight for that exact origin answers 204
+│                                        with Access-Control-Allow-Origin, the methods and headers, and a 10-minute
+│                                        preflight cache, and every response (401, 404, and SSE streams included) carries
+│                                        Access-Control-Allow-Origin and Vary: Origin. Requests still need the API
+│                                        token, and no response allows credentials or `*`. Off, an origin not listed,
+│                                        or no Origin header answers exactly as before (OPTIONS is 401, no CORS headers).
+│                                        Entries are scheme://host[:port] only: *, null, paths, queries, fragments,
+│                                        and userinfo are ignored, a single trailing / and a default port are dropped,
+│                                        and scheme and host are lowercased. An IPv6 origin takes the browser's
+│                                        compressed form (http://[::1]:5173) and a non-ASCII host its punycode
+│                                        (xn--…), since a request's Origin is matched exactly. Errors answered before
+│                                        a request is read (400, 408, 431, and 503 when the connection queue is full)
+│                                        carry no CORS headers
+│                                        // checks: local_api::browser_access_is_off_unless_the_lab_lists_the_origin,
+│                                        // an_allowed_origin_gets_its_preflight_without_a_token,
+│                                        // a_duplicate_origin_header_never_earns_cors_but_still_routes,
+│                                        // authenticated_responses_carry_only_the_allowed_origin,
+│                                        // a_streams_events_response_carries_the_allowed_origin;
+│                                        // app_settings::browser_origins normalization tests;
+│                                        // api_browser_access_is_its_own_switch_and_keeps_normalized_origins (labs.rs);
+│                                        // browser_access_shows_its_origins_on_its_card_while_on and
+│                                        // browser_access_keeps_its_typing_through_its_own_save (rune_ui); not observed
+│                                        // from a real browser page, and no live macOS or Windows request
 ├── Model in use first no labs.picker_active_first     the speech model picker shows the model in use first: Compare's first column, Every model's first row (#1019)
 ├── Use model files where they are no labs.model_in_place the picker adds a model file without copying it, so accounts can share one (#941)
+├── Smaller model files no labs.k_quant_models         (macOS) adding a model file also accepts Q6_K, Q5_K, and Q4_K weights, smaller than Q8_0 and unverified
+│                                        // checks: k_quants_are_known_only_where_the_caller_runs_them,
+│                                        // k_quant_tensors_are_measured_in_their_ggml_block_sizes (gguf_header);
+│                                        // a_k_quant_import_needs_the_lab_and_falls_back_without_it (custom_models);
+│                                        // smaller_model_files_is_its_own_switch_and_macos_only (labs.rs); not observed on Metal
 ├── Downloaded models only no labs.picker_downloaded   the picker's All speech models view can show only downloaded models, with the space Hex's copies take (#1018)
-├── Transcribe files no   labs.transcribe_files        (every OS) `hex transcribe <file>` prints a saved WAV recording's transcript
-│                                        from the selected model (or --model); Hex running sends it to POST /transcriptions with that
-│                                        model named (≤30 s on the dictation engine's loaded copy, longer clips on the service's
-│                                        own), Hex stopped loads the model here on Linux and Windows (macOS answers
-│                                        not-running); the file is capped at 64 MiB and checked as WAV here; no paste, History, or processing
-│                                        // checks: the_lab_off_refuses_and_names_its_toggle,
-│                                        // a_file_that_is_not_wav_is_refused_before_any_transcription,
-│                                        // a_wav_uses_the_selected_model_and_language, an_empty_transcript_is_no_speech,
-│                                        // a_refusal_follows_hexs_code_rather_than_its_status
-│                                        // (control/cli/transcribe.rs); a running service answered model-unavailable for an uninstalled
-│                                        // model, but no transcript answer or offline model load was observed, and nothing ran on macOS or Windows
+├── Shell completions no  labs.shell_completions        (every OS) `hex completions <shell>` prints a bash, zsh, fish,
+│                                        elvish, or PowerShell completion script for `hex`, generated at runtime from the
+│                                        same clap tree the CLI parses, so new commands and flags are in it; off, it
+│                                        answers disabled and names its toggle, and the command stays out of `hex --help`
+│                                        // checks: the_lab_off_refuses_and_names_its_toggle and
+│                                        // every_shell_gets_a_script_with_the_command_tree (control/cli/completions.rs);
+│                                        // the_cli_prints_completion_scripts (linux.rs, main.rs, windows.rs);
+│                                        // shell_completions_is_its_own_switch_and_everywhere (labs.rs); not observed as
+│                                        // a sourced script in a real shell
 ├── Keep recordings no    labs.keep_recordings         History entries keep their dictation audio; Play hears it, and Transcribe again runs it through another installed model (#1032)
 ├── Hide menu bar icon no labs.hide_menu_bar_icon      (macOS) the menu-bar icon hides while no meeting is under way; shortcuts keep working, reopening Hex shows Settings (#1064)
 ├── Pause from menu bar no labs.pause_menu             (macOS) the menu bar's action block offers Pause Hex; while paused every capture shortcut and the secure-input hotkeys are inert, the event tap passes keys through, and Resume waits for a neutral keyboard (#82)
@@ -183,6 +259,22 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Annotate 15 s replay no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
+├── Copy captures as a zip no labs.copy_capture_zip (macOS, Linux, Windows)
+│                                        a finished Annotate capture goes on the clipboard as one file, <stem>.scrawl.slim.zip, written
+│                                        inside its bundle: the manifest, summary (with the bundle's path written as `.`), contact sheet,
+│                                        and keyframes, without recording.mp4/.mov, audio.wav, frames-full/, contact-sheet-full.png, the
+│                                        media and delivery markers, or an earlier copy. Stored, with no compression; the zip is renamed
+│                                        into place, retention removes it with the bundle, and the SSH light-files copy to an agent host
+│                                        leaves it out. macOS puts a file URL on the clipboard,
+│                                        Windows CF_HDROP, Linux text/uri-list (the X11 target, or wl-copy --type text/uri-list). A failed
+│                                        build or clipboard write logs and copies the capture as before; the capsule's Paste and Send
+│                                        are unchanged, and off, the normal copy is unchanged. A terminal paste gets no text (the
+│                                        clipboard holds only the file), and scrawl.json and summary.md still name media the zip
+│                                        leaves out, because they describe the whole capture
+│                                        // checks: slim_zip (CRC-32 vector, central-directory read-back, excludes, header rewrite,
+│                                        // a second copy); a_file_is_one_percent_encoded_uri_list_line (linux/paste.rs);
+│                                        // copy_capture_zip_is_its_own_switch_and_everywhere (labs.rs); not observed pasting the
+│                                        // zip into a real chat or agent app, and the Windows clipboard write is cross-compiled only
 ├── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
 │                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
@@ -231,7 +323,12 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── A chip, a search (name, description, group), or Turned on -> only the matching cards,
 │   still under their headers; a chip or search shows every match whatever the folds,
 │   under a plain heading; none -> "No labs match" / "Nothing turned on yet"
-│   // checks: labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
+│   // checks: the_labs_search_clear_button_empties_the_field_and_brings_every_card_back,
+│   // labs_groups_fold_and_remember_it, labs_groups_follow_each_os (tests/panes.rs);
+│   // labs_search_clears_across_the_titlebar_button_and_keeps_typing (labs/store.rs):
+│   // macOS runtime, top/middle/bottom presses with the native titlebar band, both
+│   // appearances, typed and linked searches, restored cards, retained focus and typing;
+│   // observed failing without the clear callback and passing with it; no AppKit window
 │   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
 │   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
 ├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch;
@@ -242,13 +339,15 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 ├── A lab's own settings show on its card while it's on -> Unload model when idle: Unload after (5/15/30/60 min);
 │   Keep mic open after dictating: Keep open for (30 s, 1/3/5/30 min, in an inline menu);
 │   Appearance: Theme (System, Light mode, Dark mode);
+│   Voice prompt: Phrase (a text field; an invalid draft says why under it while the saved phrase keeps working);
 │   Screenshots: its shortcut, Saves to, and the macOS-takes-this-shortcut note with Open Keyboard Settings.
 │   Annotate 15 s replay's shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
 │   // appearance_shows_its_theme_on_its_card_while_on; scenes mac-labs-settings, mac-labs-screenshots
 ├── Opened by a link (macOS) -> hex://labs opens this page; ?tab=on, ?category=<group id> and ?search=<text>
-│   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one). It never turns a lab on. An unknown
+│   set the store; hex://labs/<lab> also selects that lab's group chip (unless ?category names one), scrolls to its card,
+│   and gives the card a focus border for 1.5 s (Store::flash). It never turns a lab on. An unknown
 │   or absent name -> the page opens and process.log notes it. hex://settings/<pane>
 │   (general, output, history, meetings, voice-filter) opens a main pane; one Hex doesn't show -> General.
 │   Links over 2048 bytes are ignored; a test build's scheme is hex-test://
@@ -258,7 +357,7 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 
 hex labs                                 // labs.cli; edits settings.json, no running Hex
 ├── (list) -> every feature this build has: name, on/off, audience, description, its hex settings key
-├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens Labs on its group
+├── link <feature> -> macOS: prints hex://labs/<feature> (hex-test:// in a test build), which opens Labs on its group and card
 ├── on <feature> | off <feature> -> a running Hex saves and applies it (hex settings set); otherwise settings.json
 ├── off voice-filter with the driver installed -> refused: uninstall the driver (dev builds; stable has no voice-filter)
 └── hex experiments … -> points at hex labs
@@ -296,11 +395,104 @@ Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
 `labs::more_call_apps()`, `labs::microphone_linger()`,
-`app_settings::meetings_enabled()`, or
+`labs::voice_prompt()`, `app_settings::meetings_enabled()`, or
 `app_settings::hex_microphone_enabled()`.
 Add a new feature to `labs::Feature` (name, settings key, description, audience), give
 it a row in `rune_ui/labs.rs` and a `hex settings` key, and default it off.
 When a feature graduates, remove it from Labs.
+
+Screen vocabulary (`screen-vocabulary`, macOS): while on, each dictation
+reads the focused window's visible text once, on a background thread, as the
+capture becomes real: the same point the page refresh is asked for (a hold
+past its threshold, a control start, or a released microphone opening). The
+read is bounded to 1,500 elements, 40 levels below the window, 32 KB, and a
+soft 150 ms deadline checked between elements, with the existing 0.25 s
+messaging timeout; each value is capped at 4 KB, and a text value over that
+reads only its `AXVisibleCharacterRange` (or is skipped when the app names
+none), so a document or a terminal's scrollback never fills the budget.
+`AXSecureTextField` elements and their subtrees are skipped, and Hex's own
+process is never read (`accessibility::focused_window_text`).
+`dictation::screen_vocabulary` extracts at most 24 names or technical terms:
+mixed-case and CamelCase words, letters with digits, 2–6 letter acronyms, and
+capitalized words away from a sentence's start; plain lowercase words,
+sentence-start capitals, common window labels, hexadecimal ids, ordinals,
+times, units, and random-looking tokens are dropped, then frequency and first
+appearance order them. The terms attach to that capture's context
+(`ContextSnapshot::screen_terms`) and join its transcription vocabulary after
+the mode's own terms and the shared list, inside the existing 64-term bias cap
+and prompt character budgets (`dictation::vocabulary::for_capture`). Parakeet
+reads them only with Labs › Vocabulary biasing on and a boost other than Off;
+Whisper and Qwen3-ASR read them as a prompt; Apple Speech and other models
+that take no vocabulary never read them. A capture with terms for a model
+that reads them takes its whole clip after release rather than a live stream's
+text, because a stream fixes its vocabulary when it starts; that costs a
+little latency. Meetings, the local API, and OpenCode rewriting never see the
+terms, and nothing is saved or logged except the term count and read time at
+debug level. Off, or for a model that ignores the terms, no Accessibility
+read or thread starts. Checks: `dictation::screen_vocabulary::tests` (the
+Qdrant example, sentence-start exclusion, acronyms, long all-caps words,
+stoplist and log levels, hashes, ordinals, times, units, random tokens, the
+24-term cap, dedup against the saved list),
+`a_captures_screen_terms_come_last_and_leave_with_it` and
+`parakeet_terms_need_the_biasing_lab_and_a_boost` in
+[dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
+`a_cancelled_capture_leaves_no_stale_screen_terms` and
+`one_screen_read_runs_at_a_time` in
+[dictation/screen_vocabulary.rs](../../src/dictation/screen_vocabulary.rs),
+`screen_vocabulary_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs), and `a_missing_attribute_is_none` and
+`hex_never_reads_its_own_accessibility_tree` in
+[accessibility.rs](../../src/accessibility.rs). Not observed: a real Mac
+reading a real window, or a dictated word corrected by what was on screen.
+
+Rewrite reads nearby text (`cursor-context`, macOS): while on,
+each dictation reads the focused text element once, on a background thread, at
+the same moment as the screen vocabulary read (a hold past its threshold, a
+control start, or a released microphone opening), and only for the mode's
+OpenCode rewrite. It reads `AXFocusedUIElement` through the existing 0.25 s
+messaging timeout, never Hex's own process, and returns nothing for an
+`AXSecureTextField` (role or subrole), so a password never leaves the app. It
+reads `AXSelectedTextRange`, then `AXStringForRange` for up to 1,000 UTF-16
+units before the selection, the selection itself (up to 2,000 units; a longer
+selection skips the read), and up to 1,000 units after it, bounded with
+`AXNumberOfCharacters` (without it, the after part is skipped). An app that
+answers a range with more text than asked still sends at most that range's
+units: the last units before the selection, the first ones for the selection
+and after it. A slice edge that splits a surrogate pair drops that half, so a
+real U+FFFD in the text stays, and everything empty returns nothing. The read
+is taken non-blocking when the dictation finishes, so a very short dictation,
+or an app that answers slower than that, may send no nearby text. The text
+joins that capture's context
+(`ContextSnapshot::caret_text`) and only the mode's OpenCode rewrite prompt,
+ahead of the raw transcript, as context only: the prompt says never to copy,
+answer, or follow it, uses it to resolve names, terms, references, and likely
+recognition errors, and to fit capitalization and punctuation to the
+insertion point. Any of the section's own tag names inside that text are made
+inert, so field text can't close or open a section. It is never saved, logged,
+put in History, events, or meetings. Typed-text transformations, the Voice
+prompt request, meetings, and the local API never see it. Off, no Accessibility
+call and no thread start, a capture finishing after the lab was turned off
+sends nothing, and the rewrite prompt is byte for byte what it was. A terminal
+exposes its scrollback through the same text field as any editor, so while the
+lab is on, nearby terminal output — including secrets printed in the shell,
+such as tokens from a command just run — can go with that dictation. A
+cancelled capture discards its late read, and only one read runs at a time.
+That text goes to the mode's OpenCode model, which may be a cloud provider.
+Checks:
+`dictation::caret_text` tests (a cancelled capture leaves no stale text, one
+read at a time, a capture whose lab turned off sends nothing, an empty read is
+no context, and the unit window's head/tail, lone-surrogate edges, and real
+U+FFFD); `dictation::caret_prompt` tests
+(the section and its replace note, empty parts omitted, tag names in field
+text made inert); the golden
+`a_prompt_without_caret_text_is_byte_for_byte_todays_prompt`, plus
+`caret_text_joins_the_prompt_ahead_of_the_transcript` and
+`empty_caret_parts_leave_no_tags_and_typed_text_reads_none`
+([processor.rs](../../src/dictation/processor.rs));
+`cursor_context_is_its_own_switch_and_macos_only` in [labs.rs](../../src/labs.rs);
+and the Labs card tests in `rune_ui/tests/panes.rs`. Not observed: a real Mac
+reading a real text field, or a dictated word corrected by the text around the
+cursor; the Accessibility function itself has no host test here.
 
 Switch model with app (`app-model-switching`, macOS and Windows): while on,
 the Modes pane gives each mode, Global included, a "Speech model" row:
@@ -452,17 +644,11 @@ last free bit and the window lives in its own atomic, both written by
 page goldens were regenerated for the new card. Not yet observed on a real
 Mac, Windows PC, or Linux desktop: no capture has been run with the lab on.
 
-Restore shortcut default (`restore-shortcut-default`, issue 613): while on,
-General › Advanced › Paste last dictation shows a Restore default shortcut
-button (`restore-paste-last`) whenever the shortcut is not its default
-(Option-Shift-V on macOS, Ctrl+Alt+V elsewhere), and a cleared shortcut's
-row reads "Default shortcut: …". Pressing it saves the default through the
-same checks a recorded shortcut meets; if another Hex shortcut already uses
-it, nothing changes and the recorder opens with "Already in use". Off, the
-row is exactly as before. The gate is the row itself (the feature does no
-other work). Check:
-`restore_default_brings_back_paste_last_only_with_its_lab_on` in
-[tests.rs](../../src/rune_ui/tests.rs).
+Restore shortcut default (`restore-shortcut-default`, issue 613) graduated:
+Paste last dictation's row always offers Reset when its shortcut isn't the
+default (see [dictation.md](dictation.md)). `labs.restore_shortcut_default`
+is read and ignored, and `hex labs on restore-shortcut-default` says it
+graduated.
 
 Settings search (`settings-search`, every OS): while on, General starts with
 a single-line search field. Typing keeps only the rows and cards whose title
@@ -477,8 +663,9 @@ restores the pane. The gate is the pane
 `labs::Feature::SettingsSearch`), so off, General is exactly as before.
 Checks: `settings_search_shows_with_its_lab_and_filters_general`,
 `settings_search_matches_descriptions`,
-`settings_search_keeps_permissions_and_status_cards`, and
-`command_f_focuses_general_search_only_with_its_lab_and_pane` in
+`settings_search_keeps_permissions_and_status_cards`,
+`the_settings_search_clear_button_empties_the_field_and_restores_the_pane`,
+and `command_f_focuses_general_search_only_with_its_lab_and_pane` in
 [tests.rs](../../src/rune_ui/tests.rs) and the matching test in
 [general/search.rs](../../src/rune_ui/general/search.rs). Not yet observed
 in a real window; the Labs page goldens were regenerated for macOS
@@ -555,8 +742,9 @@ it snapshots nothing, schedules no 500 ms restore, and calls its
 `Restore::keep`, so a paste made while the lab was on leaves nothing for a
 later paste with it off to bring back. A typed-text replacement, which saved
 the clipboard before it copied the selection, and a capture's PNG still
-restore; one whose clipboard snapshot failed has nothing to restore and falls
-back to the ordinary paste, so it follows the toggle too. Off, pasting and
+restore; one with no readable format, or one whose clipboard changed while it
+was read, has nothing to restore and falls back to the ordinary paste, so it
+follows the toggle too. Off, pasting and
 clipboard restore are exactly as before. Checks:
 `a_kept_paste_leaves_nothing_to_restore` and
 `a_kept_transcript_is_an_ordinary_clipboard_entry` in
@@ -596,6 +784,52 @@ on macOS too). Off, output is exactly as before. Checks:
 `contributed_options_are_labs_toggles_off_by_default` in
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation on a Mac or Windows PC with the toggle on.
+
+YOLO mode (`yolo-mode`, every OS): while on, a
+dictation started by a dictation shortcut (hold, double-tap lock, Toggle, a
+second or extra shortcut, Caps Lock dictation on macOS) whose shortcut was
+held at least `labs.yolo_mode_seconds` (1, 2, 3, 5, or 10 s,
+2 s by default; the card's Longer than picker) pastes as usual,
+then presses Return once, 100 ms later (`yolo_mode::SETTLE`), so a chat
+message sends itself. The hold is `DictationClip::held_ms`: the audio from
+the press to the release, without the pre-roll before it or the release
+tail after. Shorter dictations paste as usual. The card's Only in row
+(`labs.yolo_mode_apps`, empty by default: every app) limits it to
+chosen apps, picked with the Modes pane's application picker
+(`modes::PickerTarget::YoloMode`; a popover over the cards below its +,
+closed by a pick, a click outside, or Escape) and matched as a Mode's
+applications are (`ContextSnapshot::application_is`) against the frontmost
+app captured with the dictation; with apps chosen, a dictation whose app is
+unknown (Wayland without foreign-toplevel) never sends. It never applies to Dictate
+without processing, `hex dictation` or local API captures, printing stops,
+Copy dictation only, Live typing's input-method commits, meetings, Annotate
+captures, or Paste last dictation. Each OS decides as the output commits
+(`yolo_mode::sends` reads the lab then): macOS `parakeet::finish_output`
+picks `PasteMode::Send` (⌘V, and the continuation ends), then
+`send_unless_escaped` waits until `yolo_mode::ESCAPE_WINDOW` (500 ms) after
+the job's submission (release plus the 200 ms tail) and `SETTLE` after the
+paste, whichever is later, and presses a bare Return (`PasteMode::Return`,
+`keyboard::post_return`) only if the listener saw no Escape since submission
+(`yolo_mode::SendGate`, a count `note_escape` bumps). An Escape after the
+release leaves the text pasted and unsent, and its History entry is a
+dictation. Pastes usually land 0.25–0.5 s after submission and Return went
+100 ms after them, so the window adds at most about 0.25 s; the log has `YOLO mode pressed Return` with
+`after_submit_ms`, or `YOLO mode pasted without Return`. Windows
+`process_dictation_job` follows its paste with
+`WindowsPaster::press_return` (VK_RETURN through `SendInput`); Linux
+`DictationOutput::deliver` follows it with `LinuxPaster::press_return`
+(`Chord::Return`: XTest on X11, `wtype -k Return` or the RemoteDesktop
+portal on Wayland), with no Escape window. A sent dictation's History entry is kind Send. On Linux
+a desktop keybinding that runs `hex dictation toggle` (Wayland without the
+GlobalShortcuts portal, GNOME custom shortcuts) is a command, so it never
+sends. Checks: `a_hold_reaching_the_chosen_time_is_long_enough`,
+`chosen_apps_limit_where_it_sends`, `escape_after_submission_closes_the_gate`,
+and `return_waits_for_the_window_and_the_settle` (yolo_mode.rs);
+`escape_after_release_pastes_a_yolo_dictation_without_return` (parakeet.rs);
+`release_tail_keeps_audio_through_the_tail_and_no_further` checks
+`held_ms` (dictation.rs); `return_sends_no_modifier` (linux/paste.rs);
+`yolo_mode_is_its_own_switch_and_everywhere` (labs.rs). Not yet
+observed: a real dictation sending a message on any OS.
 
 Return to app (`return-to-app`, macOS): while on, a dictation pastes into the
 app its capture started in. `handle_hotkey_action`'s Start (shared by the
@@ -668,13 +902,110 @@ with a microphone, so every path that ends a recording is a unit test and a
 reading of the code, not an end-to-end run. The `mac-labs` goldens change with
 the new row and are regenerated on Linux.
 
+Voice prompt (`voice-prompt`, every OS): for giving one dictation a one-off
+instruction for the mode's OpenCode model. While on, `Profiles::process_cancellable`
+reads `labs::voice_prompt()` and the phrase as each dictation's processing starts,
+after speech preparation and replacements have run, and splits the transcript at
+the phrase's last whole-word occurrence. Matching ignores case, punctuation,
+and apostrophes and hyphens inside a word, so "re-write this" matches "rewrite
+this" and "don't" matches "dont", while "write this", "overwrite this", and
+"this's" don't; there is no fuzzy matching. The text before the phrase and the
+instruction after it keep their own punctuation and quotes; only whitespace and
+joins next to the phrase (`, ; :` and en/em dashes) leave.
+
+```ts
+Dictate "we ship friday. rewrite this, make it formal."   // labs.voice_prompt + labs.voice_prompt_phrase
+├── Phrase absent -> the mode's rewrite and transformations run exactly as before
+├── Text before + instruction after -> one request applies the instruction to the text
+├── Text before only (nothing after, or only thanks / thank you / please ...) -> rewrite the text clearly and concisely
+├── Instruction after only (nothing before) -> write what the instruction asks for
+├── Neither (just the phrase, or thanks or please after it) -> no request, nothing pasted
+└── Afterwards -> the mode's selected transformations still run, except after Neither
+```
+
+The one request replaces the mode's normal rewrite, including while the mode's
+rewrite switch is off, and uses that mode's model, variant, and deadline; no
+model means Hex's ranked default list. With the mode's rewrite on and a prompt
+saved, its prompt rides along as background instructions that the spoken one
+overrides. The vocabulary (the mode's terms before the shared list) and the
+foreground application and browser host are the same ones the rewrite carries,
+and the protocol still asks for paste-ready text only. A failed, empty, or
+timed-out request pastes the text before the phrase, with the punctuation it
+was dictated with; with no such text it pastes the whole corrected transcript.
+
+An organization's DisableOpenCodeProcessing lock reads as off: the card shows it
+managed, the phrase is not split, that mode processes as usual, and
+`hex settings set labs.voice_prompt_phrase` is refused as managed. The browser
+host is read for every voice prompt: on Linux and Windows `ModeRuntime::reads_page`
+turns the page on while the lab is on even when no mode rule or rewrite would,
+and macOS's `reads_browser` does the same, which can bring up the Automation
+prompt for the browser. macOS also shows the Processing stage even when the mode
+has no rewrite or transformations.
+
+Nothing pasted really is nothing. On macOS, an empty processed result or the
+flag skips the paste, last dictation, and History in `finish_output`
+([parakeet.rs](../../src/parakeet.rs)). The Neither outcome carries
+`Processed::nothing`, so the Windows and Linux listeners finish quietly without
+a failure, a paste, a last dictation, a done tone, or a `Pasted`/`Transcript
+Completed` event; their activity log records a discard and the HUD closes the
+job as cancelled, the same style as a discarded capture
+([windows/dictation.rs](../../src/windows/dictation.rs),
+[linux/dictation.rs](../../src/linux/dictation.rs)). An ordinary empty result
+still fails there as before. A printing stop answers `no-speech` instead of an
+empty transcript. The local API's `process=global` returns an empty `processed`
+and never pastes or records
+([local_api/processing.rs](../../src/local_api/processing.rs)); the Neither
+outcome also drops the mode's transformations, so one can't turn the empty
+result into text.
+
+The phrase is `labs.voice_prompt_phrase` ("rewrite this" by default), also
+`hex settings set labs.voice_prompt_phrase "<phrase>"`. It needs at least two
+words and at least six letters counted after normalization, so one common word
+can't start it. An invalid value is an `invalid-value` error; settings load
+falls back to the default without changing the saved file. While the lab is on,
+its card shows Phrase: a draft that fails validation stays in the field with the
+reason under it in danger color, and the saved phrase keeps working; a valid
+draft saves once typing pauses, like the window's other text fields. A phrase
+saved elsewhere updates the field without resetting its focus, and an invalid
+draft leaves when the lab is turned off, whether from its card or `hex settings`.
+Off, processing is byte-for-byte unchanged. Checks:
+`the_phrase_matches_whole_words_in_any_case`,
+`write_this_and_overwrite_this_never_match`,
+`hyphens_and_apostrophes_inside_words_are_ignored`,
+`the_edges_keep_their_punctuation_and_quotes`,
+`quotes_brackets_and_dashes_that_set_the_phrase_off_leave`,
+`the_last_occurrence_splits_the_dictation`,
+`the_outcome_table_covers_every_piece`, and
+`a_phrase_needs_two_words_and_six_letters` in
+[dictation/voice_prompt.rs](../../src/dictation/voice_prompt.rs);
+`a_spoken_instruction_replaces_the_rewrite_and_carries_context`,
+`a_failed_voice_prompt_pastes_its_text_or_the_whole_transcript`,
+`text_only_and_prompt_only_requests_ask_for_the_right_thing`,
+`a_closed_or_locked_voice_prompt_gate_leaves_processing_alone`,
+`a_voice_prompt_that_asks_nothing_ends_through_process_cancellable`, and
+`a_voice_prompt_with_nothing_to_ask_pastes_nothing_and_runs_no_transformations`
+in [dictation/processor.rs](../../src/dictation/processor.rs);
+`a_voice_prompt_is_locked_by_opencode_processing` and
+`the_opencode_lock_turns_only_the_voice_prompt_off_and_keeps_it_saved` in
+[policy.rs](../../src/policy.rs); `the_page_is_read_only_when_processing_uses_it`
+in [dictation/modes.rs](../../src/dictation/modes.rs);
+`voice_prompt_is_its_own_atomic_and_carries_its_phrase` in
+[labs.rs](../../src/labs.rs); `a_voice_prompt_phrase_needs_two_words_and_six_letters`
+in [control/settings.rs](../../src/control/settings.rs);
+`an_invalid_voice_prompt_phrase_loads_the_default_and_keeps_its_switch` in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs); and
+`voice_prompt_shows_its_phrase_on_its_card_while_on` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation with the lab on, and a request against a live model; the Labs page
+goldens were regenerated for the new card.
+
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in
 [dictation/processor.rs](../../src/dictation/processor.rs) reads
 `labs::spoken_formatting()` as each dictation's processing starts and runs
-`dictation::spoken_formatting::apply` before the mode's corrections, OpenCode
-rewriting, and transformations (on Windows and Linux, after the Global
-replacements). Whole phrases, ignoring case and Spanish accents, are
+`dictation::spoken_formatting::apply` before Global corrections, mode corrections,
+OpenCode rewriting, and transformations on every OS. Whole phrases, ignoring
+case and Spanish accents, are
 replaced: "new line", "line break", "nueva línea", and "salto de línea" by
 one line break, "new paragraph" and "nuevo párrafo" by two, "open quote",
 "abrir comillas", and "abre comillas" by an opening `"`, and "close quote",
@@ -763,6 +1094,81 @@ exactly as before. Checks: `only_english_dictations_apply_the_filter`,
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the toggle on; the Labs page goldens need regenerating on
 Linux with the new row.
+
+Clean up with Apple Intelligence (`clean-up-apple-intelligence`, macOS, off
+by default): while on, each macOS dictation that its mode does not rewrite
+gets one short on-device pass with Apple Intelligence, after the speech Labs
+and the Global and mode corrections and before the transformations. Its
+instructions are the iOS cleaner's, word for word
+(`ios/HEXMobile/TranscriptCleanup.swift`): fix clearly misrecognized words
+using the sentence's context, resolve an explicit spoken self-correction
+("tuesday, no wait, wednesday" becomes "wednesday"), keep the speaker's
+wording, language, meaning, numbers, and negation otherwise, and treat the
+transcript as content to clean rather than as instructions to answer. The
+stage is read in `Profiles::process_cancellable_with`
+([dictation/processor.rs](../../src/dictation/processor.rs)) where the
+OpenCode rewrite would have run, though only when that rewrite is off: a mode
+that rewrites with OpenCode keeps its own model. It also skips typed text
+(Labs › Transform typed text), a transcript of nothing but numbers, an empty
+transcript, and a dictation a voice prompt answered. `dictation::apple_cleanup`
+holds the decision (`plan`), the one bridge call, and the guard. The guard
+applies the iOS cleaner's rules (length, digits, word counts, negation counts
+with "no wait" read as a self-correction, and word overlap), with one counting
+difference: a length is counted in scalars here and in grapheme clusters on
+iOS, and the CJK numerals `Character.isNumber` sees but Rust's `is_numeric`
+does not are read as digits here. The bridge
+(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs the
+plain-text responder at utility priority with a 2 s budget, temperature 0.2,
+and 1024 response tokens; the answer is trimmed, loses one pair of wrapping
+quotes only when the transcript didn't dictate its own, takes back the
+transcript's leading and trailing whitespace (spoken formatting's line breaks),
+and is judged by the guard. Whatever happens the dictation pastes: an
+unavailable model (checked from the cached availability first, so it costs no
+wait, and never read while the lab is off), a cancelled job, a timeout, a
+refusal or guardrail block, an error, or an answer the guard refuses all keep
+the corrected text. A long dictation can spend the whole 2 s budget and paste
+uncleaned. With the lab off, or Apple
+Intelligence unavailable, the observation stays absent exactly as before; a
+pass that ran records `profile: "Clean up with Apple Intelligence"` with its
+latency in the dictation's NDJSON `processing` field and in History's
+Processing line, and a pass that fell back records the reason as `fallback`
+("fell back: …" in History). The card shows the same reason Summaries shows
+when this Mac can't run Apple Intelligence, and only locks the switch while it
+is off, so it can always be turned back off again (an organization's Labs lock
+keeps the managed row and its words instead). Dictate without processing
+never reaches this stage on macOS: its captures skip the processor entirely.
+The local API's `POST /transcriptions` with `process=global` (Labs › Process
+API transcripts) runs the same shared pipeline on this Mac
+(`local_api::processing::profiles_processor`), so a processed API transcript
+gets this pass too while the lab is on; its cancellation flag stops the stage
+before the bridge call, the same flag the pipeline's other stages read.
+Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
+`punctuation_and_case_changes_are_accepted`, `digit_changes_are_rejected`,
+`a_lost_negation_is_rejected`, `an_added_negation_is_rejected`,
+`runaway_length_is_rejected`, `an_empty_answer_or_transcript_is_rejected`,
+`an_answer_with_little_overlap_is_rejected`,
+`only_a_dictation_with_words_to_clean_is_cleaned`,
+`a_stage_that_cannot_run_changes_nothing`,
+`a_cancelled_stage_starts_nothing`,
+`quotes_go_only_when_the_transcript_did_not_dictate_them`,
+`the_transcripts_own_whitespace_comes_back`,
+`cjk_numerals_count_as_digits`, and
+`words_keep_their_apostrophes` in
+[dictation/apple_cleanup.rs](../../src/dictation/apple_cleanup.rs);
+`a_plain_text_answer_reads_its_text` in
+[apple_intelligence.rs](../../src/apple_intelligence.rs);
+`typed_text_never_reaches_the_dictation_cleanup` and
+`a_numbers_only_dictation_skips_the_cleanup` in
+[processor.rs](../../src/dictation/processor.rs);
+`clean_up_is_its_own_atomic_and_macos_only` in [labs.rs](../../src/labs.rs);
+and `contributed_options_are_labs_toggles_off_by_default`,
+`clean_up_says_why_apple_intelligence_cannot_run`, and
+`a_managed_lock_holds_the_cleanup_lab_off` in
+[panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
+dictation on a Mac with the lab on and Apple Intelligence available, and any
+real-Mac run of the new Swift bridge — this host and CI compile it, but no one
+has dictated through it yet. The Labs page goldens were regenerated on Linux
+with the new row.
 
 Subtitle export (`subtitle-export`, issue 633, macOS like Meetings; its row
 shows wherever Meetings does): while on, `hex meetings show <id> --srt` or
@@ -1507,13 +1913,55 @@ the call app coming back drops it too. After 30 s (`AUTO_STOP_GRACE`,
 `AutoStop` in [meeting/detection.rs](../../src/meeting/detection.rs)) the
 controller stops the recording as Stop & Transcribe does and logs it. Manual,
 offered, and calendar recordings never stop, and off, nothing reads the
-output and the capsule and controller are exactly as before. Not built: the
-leave-call button as a signal, per-app rules, and holding off while the
-network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
-in [labs.rs](../../src/labs.rs) and the auto-stop checks listed in
-[meetings.md](meetings.md#record). Not yet observed: a real WhatsApp, Zoom,
-or Teams call on a Mac with the toggle on; the row renders only in macOS
-builds, so no golden changes.
+output and the capsule and controller are exactly as before.
+
+A browser that never releases the microphone between calls is the second
+signal (#1775; Arc). Leaving a Google Meet call and opening the next one in
+the same browser leaves the microphone and output open, so the absence above
+never comes and one recording spanned both calls. While such a recording
+runs, an automatic one whose call's page named its code (a Meet code, from
+the address or a code-only tab title) keeps that browser's page being read
+every 2 s (`TabProbe::watching`, `TAB_QUERY_WATCH`) instead of dropping it as
+every other recording does, and the controller compares the code with the
+one the recording started with (`CallSwitch` in
+[meeting/detection.rs](../../src/meeting/detection.rs)). Another code showing
+for 4 s (`CALL_CHANGED_AFTER`) is a different call: the same "left the call"
+capsule with the 30 s grace
+(`ControllerEvent::CallEnded { auto_stop: true }`, logged "the page named a
+different call; the recording stops after its grace unless kept"), then Stop
+& Transcribe on its own `AutoStop` deadline, logged "meeting recording
+stopped automatically after its page named another call". Its deadline is
+separate from the absence one because a browser still on the microphone keeps
+the call app present, which drops that one every pass. Keep recording
+disarms both and `CallSwitch::keep()` remembers the code so it never ends
+this recording, however long it shows; a third code still does, and a
+Keep recording after the microphone-release capsule never forgets it. Hex
+reads that page about every 2 s while such a recording runs; a page that
+names no call (mail, another site) never ends it, so switching to a
+non-meeting tab mid-call stops nothing. The 4 s and the grace mean roughly
+the next call's first half-minute lands in the previous recording, and the
+next recording starts once this one finishes transcribing.
+Detection is untouched: once the recording finishes, the new code is offered
+or recorded as a new call rather than snoozed as the first one (#1113). Limits:
+only calls whose page names a code carry this signal (Google Meet today; a
+browser that exposes no address and a tab title without a code names none), a
+tab with no meeting never ends a recording, and the other apps' absence rule
+is unchanged. Not built: the leave-call button as a signal, per-app rules, and
+holding off while the network is down. Checks: `stop_when_call_ends_is_its_own_bit_and_off_by_default`
+in [labs.rs](../../src/labs.rs), and the auto-stop checks listed in
+[meetings.md](meetings.md#record), including
+`a_call_switch_fires_once_after_another_code_holds_for_a_few_seconds`,
+`a_brief_glance_at_another_call_does_not_end_a_recording`,
+`keeping_a_different_call_never_ends_the_recording_for_that_code`,
+`a_call_switch_without_a_recorded_code_never_fires`,
+`a_call_switched_to_while_the_browser_stays_on_the_microphone_is_not_snoozed`,
+`a_watched_page_is_queried_every_two_seconds_instead_of_backing_off`,
+`only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`,
+`keep_recording_disarms_the_call_switch_stop_too`, and
+`keep_recording_keeps_the_code_that_was_counting`. Not yet observed: a real
+WhatsApp, Zoom, or Teams call on a Mac with the toggle on, or a real Meet call
+switched in the same Arc window; the row renders only in macOS builds, so no
+golden changes.
 
 More call apps (`more-call-apps`, every OS with Meetings; its row shows
 wherever Meetings does): for calls in messaging apps and on websites call
@@ -1537,17 +1985,18 @@ Webex app's Windows host. Signal, Telegram, WeChat, LINE, Element, Messenger,
 and GroupMe also hold the microphone for voice notes or clips, so they keep
 it about 20 s before they count as calls, as WhatsApp does; Webex and Phone
 count after 2 s. A browser on Google Voice (`voice.google.com`), Messenger
-(`messenger.com`), Teams (`teams.live.com`), FaceTime
-(`facetime.apple.com`), GroupMe (`web.groupme.com`), or any `webex.com`
-subdomain is named after the service; these names need the browser's page,
-which Hex reads on macOS ([meetings.md](meetings.md#detect-and-offer)).
-Detected calls lists the seven apps, Google Voice, Messenger, and GroupMe
-while the lab is on. A Teams page gets its own `teams.live.com` choice from
-an offer's "…", shown as "Teams (web)", and a FaceTime page its own
-`facetime.apple.com` choice ("FaceTime (web)"); neither follows the Teams or
-FaceTime app's choice. A Webex page's `webex.com` choice is set the same way
-and covers every subdomain, so those three have no always-listed row; Ask /
-Always record / Never offer work as for the existing services. Off, offers are unchanged: those processes are not meeting apps,
+(`messenger.com`), FaceTime (`facetime.apple.com`), GroupMe
+(`web.groupme.com`), or any `webex.com` subdomain is named after the service;
+these names need the browser's page, which Hex reads on macOS
+([meetings.md](meetings.md#detect-and-offer)). Detected calls lists the seven
+apps, Google Voice, Messenger, and GroupMe while the lab is on. A FaceTime page
+gets its own `facetime.apple.com` choice from an offer's "…", shown as
+"FaceTime (web)", which does not follow the FaceTime app's choice. A Webex
+page's `webex.com` choice is set the same way and covers every subdomain, so
+those two have no always-listed row; Ask / Always record / Never offer work as
+for the existing services. Teams pages are not part of this lab: they are
+recognised without it, and follow the Microsoft Teams app's choice
+([meetings.md](meetings.md#detect-and-offer)). Off, offers are unchanged: those processes are not meeting apps,
 the pages stay unknown pages ("Browser call") after 20 s, and Detected calls
 lists exactly the services it did before. Checks:
 `more_call_apps_are_unknown_until_their_lab_is_on`,
@@ -1623,6 +2072,29 @@ in [transcription/custom_models.rs](../../src/transcription/custom_models.rs);
 [labs.rs](../../src/labs.rs). Not yet observed: a real window or a second
 macOS account; the Labs page goldens need regenerating on Linux with the new
 row.
+
+Smaller model files (`k-quant-models`, macOS): for an imported speech model
+quantized smaller than Q8_0. While on, "Add model file…" and "Use model file
+where it is…" accept Q6_K, Q5_K, and Q4_K tensors too, through the one header
+check (`custom_models::profile`, given the types this build can run:
+`gguf_header::TensorTypes`). The import's manifest records `k_quants`, and a
+saved choice of one while the lab is off stays saved while the listener runs
+the default model, with `hex status` saying "its Labs toggle is off"
+(`FallbackReason::LabsOff`, the path Parakeet Ultra uses); `hex model use` on
+one is refused and names `hex labs on k-quant-models`. Off, the rule and its
+message are exactly F32, F16, and Q8_0. Linux and Windows never run these
+files: their Vulkan builds embed shaders only for the catalog's types, so the
+lab is not listed there and the check refuses the file either way. The tensor
+sizes the header check uses come from ggml's block sizes (256 values in 144,
+176, and 210 bytes), so a cut-short file is still refused. Checks:
+`k_quants_are_known_only_where_the_caller_runs_them`,
+`k_quant_tensors_are_measured_in_their_ggml_block_sizes` in
+[gguf_header.rs](../../src/transcription/gguf_header.rs),
+`a_k_quant_import_needs_the_lab_and_falls_back_without_it` in
+[custom_models.rs](../../src/transcription/custom_models.rs), and
+`smaller_model_files_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real K-quant file transcribed
+on Metal (macOS), or the row in a real window.
 
 Downloaded models only (`picker-downloaded`, issue 1018, every OS): for
 seeing which speech models take disk space and deleting unused ones. While
@@ -1896,7 +2368,8 @@ shortcut uses) opens a second copy of Annotate's capture picker
 ├── Space      -> window mode: a camera replaces the pointer and the window under it highlights;
 │                 Space again -> area
 ├── Click      -> the whole display ("Full screen · Click to capture")
-├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut
+├── Escape     -> closes it, nothing shot; Escape reaches no other app or Hex shortcut;
+│                 a permission reply for that opening cannot reopen it or change a later pick
 └── Release    -> shot at the display's own pixels (ScreenCaptureKit), Hex's overlays,
                   the picker, and the pointer left out
                   ├── PNG (pHYs at the display's scale) -> "Hex Screenshot 2026-11-04 at 14.03.22.png"
@@ -1940,7 +2413,8 @@ cards
 CleanShot's ⌘S saves the capture; every Hex capture is already saved,
 so ⌘S shows it in Finder instead.
 
-Every shot and recording the Lab saves is also listed in the Captures
+Every shot and recording the Lab saves, and every annotation and replay
+Annotate wrote to its captures folder, is also listed in the Captures
 pane ([captures.rs](../../src/rune_ui/captures.rs)), which sits under
 History in the sidebar while the Lab is on. It is its own pane rather than
 a part of History: its rows are pictures and movies with their own
@@ -1949,12 +2423,19 @@ actions, and History's retention menu and Clear all don't apply to them.
 ```ts
 Captures
 ├── search      -> every word in what was said over it, its file name, or its kind
+│                  (an annotation: its words, app, the session it went to)
 ├── rows        -> newest first, the last 30 days, only files still where they were saved:
 │                  thumbnail · the words said over it (else the file's name) ·
-│                  "Screenshot · 2880 × 1800" or "Screen recording · 0:42" · its age
-├── click       -> the editor (a shot with its words; a recording to trim)
-├── drag        -> the file
+│                  "Screenshot · 2880 × 1800", "Screen recording · 0:42",
+│                  "Annotation · 0:18", or "Annotation · Video expired" · its age
+├── click       -> the editor (a shot with its words; a recording, or an
+│                  annotation's movie with its timed words, to trim; an
+│                  annotation whose movie expired: its first keyframe)
+├── drag        -> the file (an annotation's movie, else its keyframe)
 ├── hover       -> Copy, Show in Finder, Move to Trash in the age's place
+│                  (Copy: a check only once the clipboard has it, else the
+│                  error tone; an annotation copies as Annotate does; Trash
+│                  moves an annotation's whole bundle)
 └── nothing yet -> "No captures yet." and what shows here
 ```
 
@@ -1962,19 +2443,34 @@ The list reads an owner-only index in Application Support
 (`captures/index.json`, 0600 in a 0700 folder) with a 240 px PNG thumbnail
 per entry beside it ([history/captures.rs](../../src/history/captures.rs)),
 never the files themselves. A shot is remembered as it saves, a recording
-once its movie is saved, and words said over a shot in the editor replace
-its entry's words. Entries past 30 days or past 500 entries drop with
+once its movie is saved, and each accepted dictation over a shot appends to
+that shot's entry. Closing or replacing its editor before release returns
+the dictation to ordinary paste. After release, its words stay attached to
+the original shot even if the editor closes; they never land on a different
+shot or finish a newer dictation. Escape cancels only that narration request.
+Pure request tests live in `screenshot_thumbnail/editor/narration.rs` and
+`screenshots/picker.rs`; these are not native shortcut or permission proof.
+Entries past 30 days or past 500 entries drop with
 their thumbnails the next time one is added; each keeps at most 4 KiB of
 words. Move to Trash (a card's or the pane's) forgets the entry. The
 editor's Save makes a new file that isn't listed. Writes are atomic, and a
 malformed index is kept aside as `index.json.corrupt`.
+
+Annotations come from the captures folder itself
+([history/annotations.rs](../../src/history/annotations.rs)), never an
+index: while the pane shows, a `hex-captures-scan` thread lists the
+`*.scrawl` bundles at most every 5 s, skips any whose name dates it past 30
+days, and reads only the `scrawl.json` files that changed since the last
+scan. Annotate's replays are written as ordinary bundles, so they list as
+annotations too.
 
 The last ten cards closed (by ✕, a key, the menu, opening the editor, or
 the stack reaching the top) are kept in memory. The menu bar's Restore
 Last Capture, shown while the Lab is on and dimmed until a card was
 closed, brings back the newest of them, sliding in from the right edge
 into the corner; one whose file is gone is skipped, and Move to Trash
-keeps none. They don't outlast Hex.
+keeps none. They don't outlast Hex: after a relaunch the Captures pane is
+the way back to a closed card's capture.
 
 The card's overlay is the whole display under the pointer, click-through
 outside the card, so the card can start anywhere a shot was taken from.
@@ -2190,7 +2686,9 @@ and the mark model in [screenshot_thumbnail/editor/marks.rs](../../src/rune_ui/s
 `screenshots_is_its_own_bit_and_off_by_default` in [labs.rs](../../src/labs.rs);
 the index's order, reopen, owner-only modes, search, window, caps, forgetting,
 words, and a malformed file in [history/captures.rs](../../src/history/captures.rs);
-the Captures pane as the `captures` golden (light and dark) and
+the annotation listing's window, order, expired movies, search, and rescan in
+[history/annotations.rs](../../src/history/annotations.rs);
+the Captures pane (with an annotation row) as the `captures` golden (light and dark) and
 `--scene captures-empty`;
 its card renders as `--scene mac-labs-screenshots`; the card's entrance
 and the stack's motion are `thumbnail_frames` (`HEX_SCREENSHOT_FRAMES`
@@ -2546,6 +3044,12 @@ written while the lab was on still follows later notes and renames. Checks:
 `windows-labs`, `linux-labs`) show the new card. Not yet observed: a real macOS
 end-to-end run writing, renaming, and trashing a separate notes file.
 
+Transcribe files (`transcribe-files`) graduated: `hex transcribe <file>`
+always works now, reads common audio and video formats, and starts its own
+embedded service when Hex isn't running ([control-cli.md](control-cli.md)).
+`hex labs on|off transcribe-files` still answers with that and exits 0
+(`labs::GRADUATED`); the saved `labs.transcribe_files` key is ignored.
+
 Meeting platform icons (`meeting-platform-icons`, issue 1290) graduated:
 each recording in the Meetings list always shows its call service's icon, or
 a neutral one ([meetings.md](meetings.md)). `hex labs on|off
@@ -2588,12 +3092,32 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   feeds, and no host adds the line's overlay. Each dictation's `finished
   live stream` line in process.log counts its text changes (`partials`);
   `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
-  fed and the word counts, never the words. Checks:
+  fed and the word counts, never the words. Under its description, its card
+  adds a line when no words can show: the selected model's catalog
+  `ModelDefinition::streams` is false (the line names the streaming models
+  from the catalog that take the saved language, and with none for it says
+  only that the model doesn't show live words), or, on Linux, Speech engine
+  is explicitly CPU (which never streams). An imported model gets no line:
+  its catalog entry says it can't stream, but its GGUF is only checked when it
+  loads. A resolved CPU on Auto (#856's slow-iGPU verdict) isn't known to the
+  window, so that case has no card line. When a capture wants live text and
+  no stream opens yet, process.log names the reason once per capture (the
+  model doesn't stream, it isn't streaming on this device, or no streaming
+  speech model is loaded), and a stream begun while the loaded model can't
+  stream logs `a live stream was requested but this model can't stream on its
+  device`, or says no speech model is loaded when none could load.
+  Checks:
   `a_dictation_stream_publishes_its_text_after_each_feed_with_live_text`,
   `without_live_text_a_dictation_stream_publishes_nothing`,
   `each_dictation_stream_has_its_own_text`, and
   `a_failed_feed_clears_the_text_and_stops_publishing` in
-  [transcription/engine.rs](../../src/transcription/engine.rs);
+  [transcription/engine.rs](../../src/transcription/engine.rs), and
+  `a_stream_refusal_names_the_model_or_the_device` there;
+  `live_text_says_which_models_show_live_words`,
+  `live_text_suggests_no_model_for_another_language`,
+  `live_text_never_judges_an_imported_model`, and
+  `live_text_says_when_the_cpu_engine_stops_the_words` in
+  [rune_ui/labs.rs](../../src/rune_ui/labs.rs);
   `live_text_follows_the_recording_and_never_outlives_it` in
   [dictation.rs](../../src/dictation.rs); the three tests in
   [dictation/live_text.rs](../../src/dictation/live_text.rs) (a recording's end clears only its
@@ -2635,8 +3159,15 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   text field, replaced on each update, and its final text is committed
   through `zwp_input_method_v2` instead of the clipboard paste
   (`labs.live-typing`; the toggle is `labs.live_typing`, off by default, Linux
-  only, and its card is hidden in an X11 session). It is read at the hold
-  threshold, or at the Toggle press, never for a Local API
+  only, and its card is hidden in an X11 session). On Wayland, the card asks
+  the compositor's registry once at window load
+  (`linux::paste::wayland_offers("zwp_input_method_manager_v2")`); without
+  that global (GNOME) it stays listed, disabled while off, with a line under
+  its description that this desktop offers no input method it needs and
+  dictations paste normally, and `hex labs` prints the same note in its list
+  and after `hex labs on live-typing` (never refusing the toggle). An
+  organization's managed lock keeps its own note, and the CLI adds none. It is
+  read at the hold threshold, or at the Toggle press, never for a Local API
   dictation, `/streams`, or Voice Action; the final text still goes through
   Output's processing, and History and Paste Last update as they do for a
   paste. Hex creates the input method when the capture becomes intentional
@@ -2685,7 +3216,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `a_typing_demand_feeds_the_engine_without_wanting_the_plate` in
   [dictation/live_text.rs](../../src/dictation/live_text.rs); and
   `the_plate_follows_the_decision_made_when_the_stream_opened` in
-  [dictation.rs](../../src/dictation.rs). **Not verified
+  [dictation.rs](../../src/dictation.rs); and
+  `live_typing_says_when_the_desktop_cannot_use_it` in
+  [rune_ui/tests/panes.rs](../../src/rune_ui/tests/panes.rs). **Not verified
   on a real compositor**: only unit tests and the build, plus the Linux Labs
   golden's new card.
 - Playground: Rune's playground in the window (every OS), `labs.playground`
@@ -2818,6 +3351,15 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `dictation::vocabulary::transcription_bias` returns nothing, so no run or stream takes
   the list; rewriting and search still use it, and the Vocabulary sheet says
   so.
+- Screen vocabulary (macOS): each dictation may read the focused window's
+  visible text through Accessibility as temporary vocabulary. Off by default
+  (`labs.screen_vocabulary`). Parakeet reads the terms only with Vocabulary
+  biasing on and a boost other than Off; Whisper and Qwen3-ASR read them as a
+  prompt; Apple Speech and models that take no vocabulary read nothing. A
+  capture with terms for such a model uses its whole-clip run rather than a
+  live stream's text, so the text arrives after release with a little more
+  latency. Its read bounds and extraction are above, under "Screen
+  vocabulary".
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.

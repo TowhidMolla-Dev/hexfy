@@ -42,6 +42,19 @@ impl Group {
         }
     }
 
+    /// Its English header in Settings › Labs.
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Dictation => "Dictation",
+            Self::Output => "Output",
+            Self::History => "History",
+            Self::Meetings => "Meetings",
+            Self::Annotate => "Annotate",
+            Self::Shortcuts => "Shortcuts",
+            Self::Models => "Models",
+        }
+    }
+
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|group| group.id() == id)
     }
@@ -56,6 +69,7 @@ impl Feature {
             | Self::LiveTyping
             | Self::NotchIndicator
             | Self::VocabularyBiasing
+            | Self::ScreenVocabulary
             | Self::PauseBrowser
             | Self::KeepMicrophoneOpen
             | Self::SkipPauses
@@ -71,6 +85,7 @@ impl Feature {
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::FillerWords
+            | Self::CleanUpWithAppleIntelligence
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp
@@ -81,7 +96,12 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::PrintStart => Group::Output,
+            | Self::ApiBrowserAccess
+            | Self::PrintStart
+            | Self::ShellCompletions
+            | Self::YoloMode
+            | Self::CursorContext
+            | Self::VoicePrompt => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::HistoryMultiSelect
@@ -100,7 +120,10 @@ impl Feature {
             | Self::MeetingDescriptiveFilenames
             | Self::MeetingNotesFile
             | Self::ExpireMeetingAudio => Group::Meetings,
-            Self::Screenshots | Self::AnnotateReplay | Self::GnomeAnnotate => Group::Annotate,
+            Self::Screenshots
+            | Self::AnnotateReplay
+            | Self::GnomeAnnotate
+            | Self::CopyCaptureZip => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::MoreDictationShortcuts
@@ -108,7 +131,6 @@ impl Feature {
             | Self::SidedChords
             | Self::TapOrHold
             | Self::DoubleTapModifiers
-            | Self::RestoreShortcutDefault
             | Self::StandaloneSpecialKeys
             | Self::SectionKeyAlone
             | Self::ShareShortcut
@@ -121,9 +143,9 @@ impl Feature {
             | Self::BenchmarkDetails
             | Self::PickerActiveFirst
             | Self::ModelInPlace
+            | Self::KQuantModels
             | Self::PickerDownloaded
-            | Self::ParakeetUltra
-            | Self::TranscribeFiles => Group::Models,
+            | Self::ParakeetUltra => Group::Models,
         }
     }
 }

@@ -36,7 +36,12 @@ does not offer the protocol, another input method (fcitx, ibus) holds the
 seat, the focused field has no active text input, the final text is
 multi-line, or the compositor does not answer in time. A CPU engine or a
 model that cannot stream shows no provisional words while speaking, but the
-final text still goes in through the input method. It has **not** been
+final text still goes in through the input method. Hex checks the
+compositor's registry when the window loads: on a Wayland desktop without the
+protocol (GNOME) Settings › Labs keeps its card, disabled while off, with a
+note that this desktop offers no input method Live typing needs, and `hex labs`
+prints the same note in its list and after `hex labs on live-typing`. The
+toggle is not refused, and dictations paste normally. It has **not** been
 verified on a real compositor yet; only its unit tests and the build ran.
 
 With **Labs › Transform typed text** on (`labs.typed_text`, off by default),
@@ -592,8 +597,8 @@ a stop sound marks the end of a retained recording (not completed transcription
 or paste), and a cancel sound acknowledges cancellation of an active capture.
 Brief taps still play the start sound, but recordings shorter than 300 ms remain
 discarded and do not play the stop sound. **Sound volume** in Settings
-offers Off, 25%, 50%, 75%, and 100%; changes save immediately without restarting
-the listener and preview the start sound unless set to Off. `hex dictate` uses
+is a slider from Off to 100%; releasing it saves without restarting the
+listener and previews the start sound unless it is at Off. `hex dictate` uses
 the same saved volume. Playback uses the default audio output through a bounded
 background worker; unavailable audio output does not prevent dictation.
 

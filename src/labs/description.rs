@@ -22,6 +22,9 @@ impl Feature {
             Self::VocabularyBiasing => {
                 "Bias Parakeet transcription toward your vocabulary; rewriting and search use it either way"
             }
+            Self::ScreenVocabulary => {
+                "Window names and terms become temporary vocabulary. Read locally, never saved. Parakeet needs Vocabulary biasing, and a dictation with terms runs after release instead of from the live stream."
+            }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
             Self::KeyboardModelSwitching => {
                 "Changing the keyboard language switches the speech model and language"
@@ -38,9 +41,6 @@ impl Feature {
             Self::KeepMicrophoneOpen => {
                 "With Turn off the mic when not dictating on, keep the microphone open for a while after each dictation (labs.keep_microphone_open_seconds), so the next one starts at once"
             }
-            Self::RestoreShortcutDefault => {
-                "Offer Restore default next to Paste last dictation's shortcut"
-            }
             Self::KeepOnClipboard => {
                 "Leave the dictation on the clipboard after pasting instead of restoring what was there"
             }
@@ -53,6 +53,9 @@ impl Feature {
             }
             Self::FillerWords => {
                 "Remove filler words such as um and uh from dictations, without an AI model"
+            }
+            Self::CleanUpWithAppleIntelligence => {
+                "Fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence"
             }
             Self::SubtitleExport => {
                 "Export meeting transcripts as SRT or VTT subtitles with hex meetings show"
@@ -116,6 +119,9 @@ impl Feature {
             Self::ModelInPlace => {
                 "Add a speech model file and use it where it is, without copying it, so several accounts can share one file"
             }
+            Self::KQuantModels => {
+                "Add your own speech model files that use Q6_K, Q5_K, or Q4_K weights. They are smaller than Q8_0 but Hex hasn't verified them, so accuracy may vary."
+            }
             Self::PickerDownloaded => {
                 "Show only downloaded speech models in the picker, with the space they take"
             }
@@ -160,6 +166,9 @@ impl Feature {
             Self::Screenshots => {
                 "Take a screenshot of an area or a window with a shortcut (Command-Shift-4 by default): copied, saved, and shown in the corner"
             }
+            Self::CopyCaptureZip => {
+                "A finished capture copies as one zip file, without video or audio."
+            }
             Self::FollowLiveTranscript => {
                 "While a meeting records, the transcript scrolls to the newest line. Scroll up to read earlier text; scroll back to the bottom to follow again."
             }
@@ -190,14 +199,14 @@ impl Feature {
             Self::OpenCodeInWsl => {
                 "Use an OpenCode service running in your default WSL distribution for Modes rewriting and the Modes model picker; looking for it can start WSL"
             }
-            Self::TranscribeFiles => {
-                "Turn a WAV recording into text with hex transcribe <file> and your dictation model"
-            }
             Self::ApiProcessing => {
                 "Let apps using Hex's local API ask for transcripts with your Global mode's corrections, rewrite, and transformations applied"
             }
             Self::ApiTimestamps => {
                 "Let apps using Hex's local API ask for each segment's or word's start and end times in the transcript, as the speech model heard them"
+            }
+            Self::ApiBrowserAccess => {
+                "Let web pages from the origins you list call Hex's local API from the browser; every request still needs the API token"
             }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers; headphones are left alone"
@@ -208,6 +217,16 @@ impl Feature {
             Self::PrintStart => {
                 "Let hex dictation start --print hand the transcript to the command that started it, however the recording ends"
             }
+            Self::VoicePrompt => {
+                "Say \"rewrite this\" in a dictation, then an instruction; Hex applies it with the mode's OpenCode model"
+            }
+            Self::CursorContext => {
+                "The mode's OpenCode rewrite uses the text around the cursor to spell names and terms right and fit where it pastes. That text goes to the mode's model, which may be a cloud provider; password fields are never read"
+            }
+            Self::ShellCompletions => {
+                "Print a completion script for bash, zsh, fish, elvish, or PowerShell with hex completions <shell>"
+            }
+            Self::YoloMode => "Send dictations automatically",
         }
     }
 }

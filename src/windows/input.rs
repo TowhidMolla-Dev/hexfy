@@ -202,7 +202,7 @@ enum Disposition {
 
 const EVENT_CAPACITY: usize = 16;
 const MAX_EVENT_DELAY_MS: u32 = 60_000;
-const DOUBLE_TAP_WINDOW_MS: u32 = 300;
+const DOUBLE_TAP_WINDOW_MS: u32 = crate::dictation::DOUBLE_TAP_WINDOW.as_millis() as u32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeyAction {
@@ -305,6 +305,8 @@ struct CaptureState {
     /// The shortcut, not another, owns this capture (or the last one).
     flavour: DictationFlavour,
 }
+
+mod commands;
 
 impl CaptureState {
     /// Whether another shortcut owns a capture in progress.
@@ -1914,6 +1916,49 @@ mod tests {
         // The next press finishes the locked capture.
         assert_eq!(state.press(true, true, 3_000), Some(HotkeyAction::Finish));
         assert!(!state.locked);
+    }
+
+    #[test]
+    fn command_capture_finishes_on_the_first_physical_press_in_either_mode() {
+        for toggle in [false, true] {
+            for flavour in [DictationFlavour::Normal, DictationFlavour::Raw] {
+                let mut state = CaptureState {
+                    toggle,
+                    ..Default::default()
+                };
+                state.start_command(flavour);
+                assert!(state.recording);
+                assert_eq!(state.wants_cancel(), toggle);
+                assert!(!state.owned_by_other(flavour));
+                assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Finish));
+                assert_eq!(state.release(true, 150), None);
+                assert!(!state.wants_cancel());
+                assert!(!state.recording);
+            }
+        }
+    }
+
+    #[test]
+    fn command_stop_clears_a_physical_hold_without_a_second_finish() {
+        let mut state = CaptureState::default();
+        assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
+        assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
+        assert_eq!(state.release(true, 150), None);
+        assert_eq!(state.press(true, false, 200), Some(HotkeyAction::Start));
+        assert_eq!(state.release(true, 250), Some(HotkeyAction::Finish));
+    }
+
+    #[test]
+    fn command_capture_cancels_without_leaving_the_hook_locked() {
+        let mut state = CaptureState {
+            toggle: true,
+            ..Default::default()
+        };
+        state.start_command(DictationFlavour::Normal);
+        assert!(state.wants_cancel());
+        assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
+        assert!(!state.wants_cancel());
+        assert_eq!(state.press(false, false, 100), Some(HotkeyAction::Start));
     }
 
     #[test]

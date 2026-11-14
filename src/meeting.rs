@@ -12,7 +12,7 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use serde::{Deserialize, Serialize};
 
 use crate::desktop::events::now_ms;
-use crate::durable::{sync_directory, sync_file};
+use crate::durable::{lock_contended, sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
@@ -69,6 +69,7 @@ mod transcript;
 mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
+pub use capture::voice_level;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
@@ -80,7 +81,7 @@ pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, sp
 pub use notes::{summarize, summarize_file};
 #[cfg(test)]
 pub use retention::audio_expired;
-pub use retention::{expire, expire_audio, expired, retention_for};
+pub use retention::{expire, expire_audio, list, retention_for};
 pub use transcript::TranscriptReader;
 pub use warning::TrackWarning;
 
@@ -1013,7 +1014,8 @@ pub fn finish_pending(id: &str) -> Result<Option<MeetingManifest>> {
     finish::finish_transcription(&directory, manifest, &selection).map(Some)
 }
 
-pub fn list() -> Result<Vec<MeetingManifest>> {
+/// Maintenance must still see expired folders, including failed Trash attempts.
+fn list_all() -> Result<Vec<MeetingManifest>> {
     let root = root()?;
     let mut meetings = Vec::new();
     for entry in match fs::read_dir(root) {
@@ -1083,13 +1085,6 @@ fn meeting_is_active(directory: &Path) -> Option<bool> {
             None
         }
     }
-}
-
-/// Whether a failed try-lock means another handle holds the lock: `flock`'s
-/// `EWOULDBLOCK` on Unix, `ERROR_LOCK_VIOLATION` on Windows.
-fn lock_contended(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::WouldBlock
-        || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
 }
 
 fn recovered_status(

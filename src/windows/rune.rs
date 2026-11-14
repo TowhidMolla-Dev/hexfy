@@ -265,6 +265,8 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     let quit = window.clone();
     let runtime_tray = tray.clone();
     let runtime_shared = shared.clone();
+    let dictations = crate::dictation::service::DictationQueue::from(dictations);
+    let listener_queries = dictations.clone();
     let runtime = std::thread::Builder::new()
         .name("hex-runtime".into())
         .spawn(move || {
@@ -278,7 +280,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 shutdown,
                 hud,
                 runtime_tray.as_deref(),
-                dictations.into(),
+                dictations,
                 processing,
             );
             quit.quit();
@@ -286,6 +288,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     crate::control::host::serve(
         control_receiver,
         Arc::new(WindowsControl {
+            dictations: listener_queries,
             runtime: runtime_handle(),
             shared,
             window: Mutex::new(window.clone()),
@@ -380,7 +383,10 @@ fn run_runtime(
         let published = Arc::new(host.publish());
         let changed = {
             let mut current = lock(&shared.published);
-            let changed = current.as_deref() != Some(&published);
+            let changed = current.as_deref() != Some(&published)
+                || current.as_ref().is_some_and(|old| {
+                    old.settings.source.revision != published.settings.source.revision
+                });
             if changed {
                 *current = Some(published.clone());
             }
@@ -418,6 +424,7 @@ fn runtime_handle() -> RuntimeHandle {
 /// The Windows adapter `hex` control commands from the local API run
 /// through ([`crate::control::host`]).
 struct WindowsControl {
+    dictations: crate::dictation::service::DictationQueue,
     runtime: RuntimeHandle,
     shared: Arc<Shared>,
     window: Mutex<rune::AppHandle<Ui>>,
@@ -466,9 +473,16 @@ impl crate::control::host::Host for WindowsControl {
             listener: published.listener.clone(),
             transcription: published.transcription.clone(),
             update: published.update_status.clone(),
-            capture: crate::control::host::capture_from_state(published.activity),
             window_open: self.window().is_visible(),
         })
+    }
+
+    fn capture(&self) -> std::result::Result<crate::control::CaptureSnapshot, ControlError> {
+        if self.state()?.listener.running {
+            self.dictations.snapshot(crate::windows::dictation::wake)
+        } else {
+            Ok(Default::default())
+        }
     }
 
     fn dictation(
@@ -488,9 +502,12 @@ impl crate::control::host::Host for WindowsControl {
         self.listener(crate::windows::dictation::ListenerCommand::PasteLast)
     }
 
-    fn save(&self, settings: AppSettings) -> std::result::Result<(), ControlError> {
-        settings
-            .save()
+    fn save(
+        &self,
+        base: &AppSettings,
+        settings: AppSettings,
+    ) -> std::result::Result<(), ControlError> {
+        base.update(&settings)
             .map_err(|error| ControlError::new("internal", format!("couldn't save: {error:#}")))?;
         self.send(Request::ReloadSettings)
     }

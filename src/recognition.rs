@@ -229,7 +229,10 @@ pub fn listen(
     #[cfg(hex_capture)]
     let mut capture_shortcut = crate::capture_host::CaptureShortcut::default();
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
-    let mut personal_host_enabled = crate::app_settings::custom_transformations_enabled();
+    let mut personal_host_enabled = crate::personal_commands::host_needed(
+        crate::app_settings::custom_transformations_selected(),
+    );
+    let mut next_personal_host_check = Instant::now();
     let mut personal_commands = personal_host_enabled
         .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
         .flatten();
@@ -685,12 +688,19 @@ pub fn listen(
             input.set_release_while_idle(next_microphone_policy.release_while_idle);
         }
         microphone_policy = next_microphone_policy;
-        let next_personal_host_enabled = crate::app_settings::custom_transformations_enabled();
-        if next_personal_host_enabled != personal_host_enabled {
-            personal_host_enabled = next_personal_host_enabled;
-            personal_commands = personal_host_enabled
-                .then(|| crate::personal_commands::PersonalCommands::start(transformations.clone()))
-                .flatten();
+        if Instant::now() >= next_personal_host_check {
+            next_personal_host_check = Instant::now() + Duration::from_millis(250);
+            let next_personal_host_enabled = crate::personal_commands::host_needed(
+                crate::app_settings::custom_transformations_selected(),
+            );
+            if next_personal_host_enabled != personal_host_enabled {
+                personal_host_enabled = next_personal_host_enabled;
+                personal_commands = personal_host_enabled
+                    .then(|| {
+                        crate::personal_commands::PersonalCommands::start(transformations.clone())
+                    })
+                    .flatten();
+            }
         }
         if hotkeys.configure(CaptureInstant::now()) {
             handle_hotkey_action(
@@ -788,6 +798,11 @@ pub fn listen(
             }
             if hotkey_capture_suspended {
                 continue;
+            }
+            // Labs › YOLO mode: Escape after a release skips that
+            // dictation's Return.
+            if input_event.is_escape_down() {
+                crate::dictation::yolo_mode::note_escape();
             }
             #[cfg(hex_capture)]
             if let Some(host) = capture_host.as_mut() {
@@ -925,24 +940,6 @@ pub fn listen(
                     }
                     continue;
                 }
-                WorkerEvent::Cancelled { job_id } => {
-                    if let Some(finishing) = programmatic_results.remove(&job_id) {
-                        finish_with_result(
-                            finishing.id,
-                            finishing.owner_token,
-                            finishing.replies,
-                            Err("cancelled".into()),
-                            &mut programmatic_completions,
-                        );
-                        continue;
-                    }
-                    handle_dictation_event(
-                        WorkerEvent::Cancelled { job_id },
-                        &mut events,
-                        indicator,
-                    )?;
-                    continue;
-                }
                 event => handle_dictation_event(event, &mut events, indicator)?,
             }
         }
@@ -953,16 +950,22 @@ pub fn listen(
         let capture_escape = capture_host.is_some() && capture_shortcut.takes_escape();
         #[cfg(not(hex_capture))]
         let capture_escape = false;
-        input_monitor.set_takes_escape(claims_escape(programmatic.is_some(), capture_escape));
+        // A held Hold capture takes Escape once it is past the hold threshold.
+        input_monitor.set_takes_escape(claims_escape(
+            programmatic.is_some(),
+            capture_escape,
+            hotkeys.takes_escape(CaptureInstant::now()),
+        ));
         // Toggle's cancel key is Hex's only while one of its shortcuts'
         // recordings runs; the listener ignores keys during a programmatic one.
-        input_monitor.set_takes_cancel(programmatic.is_none() && hotkeys.any_recording());
-        // A Caps Lock capture is hands-free in Hold mode too, so Escape
-        // keeps its Toggle-mode cancel meaning while it records.
-        input_monitor
-            .set_caps_lock_cancel(programmatic.is_none() && hotkeys.caps_lock.is_recording());
-        // An extra shortcut takes its own cancel key in its own mode too.
-        input_monitor.set_extra_cancel(programmatic.is_none() && hotkeys.extra_recording());
+        // A Caps Lock capture keeps Escape in Hold mode too, and an extra
+        // shortcut its own cancel key in its own mode.
+        input_monitor.set_cancel(
+            programmatic
+                .is_none()
+                .then(|| hotkeys.recording_cancel())
+                .flatten(),
+        );
         if received_worker_event {
             emit_engine_state(
                 &mut events,
@@ -1236,6 +1239,9 @@ fn handle_hotkey_action(
             // Labs › Return to app: this paste goes back to the app in front
             // now, even if another one comes forward while the person talks.
             worker.remember_return_to_app();
+            // Labs › YOLO mode: a shortcut started this capture
+            // unless a `hex dictation` command says otherwise below.
+            worker.set_started_by_shortcut(true);
             // The press started a capture, but it may still be provisional:
             // no page is read until the capture is held past its threshold.
             context.begin();
@@ -1487,6 +1493,8 @@ fn control_dictation(
                 release_while_idle,
             )?;
             if accepted {
+                // Labs › YOLO mode never sends a command's capture.
+                worker.set_started_by_shortcut(false);
                 // A warm start already queued its provisional tone. A control
                 // start has no hold threshold to wait for, so its capture is
                 // real now and reads its page at once.
@@ -1716,13 +1724,6 @@ fn handle_dictation_event(
                 DictationJobStage::Processing => DictationIndicatorEvent::Processing {
                     job_id: job_id.value(),
                 },
-            });
-        }
-        WorkerEvent::Cancelled { job_id } => {
-            // A submitted job left the HUD's job set only when it completed
-            // or failed; tell both the HUD and the light that it is gone.
-            indicator.send(DictationIndicatorEvent::JobCancelled {
-                job_id: job_id.value(),
             });
         }
         WorkerEvent::ModelFailed(error) => {
@@ -2012,9 +2013,9 @@ mod tests {
         assert!(!hotkeys.any_recording());
     }
 
-    /// Escape cancels a recording extra in its own mode, and the dictation
-    /// shortcut keeps its Hold-mode behavior (no cancel at all). A locked
-    /// extra is cancelled too while that shortcut ignores Escape as it holds.
+    /// Escape cancels a recording extra in its own mode, locked included,
+    /// and the Hold-mode dictation shortcut only while it is held past the
+    /// hold threshold.
     #[test]
     fn escape_cancels_a_locked_extra_that_records() {
         let base = CaptureInstant::from_nanos(140_000_000_000);
@@ -2061,13 +2062,24 @@ mod tests {
         assert!(escape(&mut hotkeys, false, 0, 500).is_empty());
         assert!(!hotkeys.extra[0].as_ref().unwrap().is_recording());
 
-        // Hold dictation still ignores Escape while its key is held.
+        // Hold dictation ignores Escape until the hold threshold makes the
+        // press Hex's (it may be Option-Escape); then Escape cancels it, and
+        // the tap keeps it from the app.
         assert_eq!(
             press(&mut hotkeys, OPTION_KEY_MASK, 600),
             [(Shortcut::Dictation, START)]
         );
+        assert!(!hotkeys.takes_escape(at(680)));
         assert!(escape(&mut hotkeys, true, OPTION_KEY_MASK, 680).is_empty());
+        assert!(escape(&mut hotkeys, false, OPTION_KEY_MASK, 700).is_empty());
         assert!(hotkeys.dictation.is_recording());
+        assert!(hotkeys.takes_escape(at(900)));
+        assert_eq!(
+            escape(&mut hotkeys, true, OPTION_KEY_MASK, 1_000),
+            [(Shortcut::Dictation, HotkeyAction::CancelShortcut)]
+        );
+        assert!(!hotkeys.dictation.is_recording());
+        assert!(!hotkeys.takes_escape(at(1_000)));
     }
 
     fn caps_lock_hotkeys(
@@ -2216,13 +2228,15 @@ mod tests {
     }
 
     #[test]
-    fn only_a_capture_claims_escape() {
+    fn a_capture_or_a_held_dictation_claims_escape() {
         // The capture picker would otherwise claim Escape that the listener
         // then ignores during a programmatic dictation.
-        assert!(!claims_escape(true, true));
-        assert!(claims_escape(false, true));
-        // Dictation never takes Escape from the app (#786).
-        assert!(!claims_escape(false, false));
+        assert!(!claims_escape(true, true, false));
+        assert!(!claims_escape(true, false, true));
+        assert!(claims_escape(false, true, false));
+        assert!(claims_escape(false, false, true));
+        // A hands-free dictation never takes Escape from the app (#786).
+        assert!(!claims_escape(false, false, false));
     }
 
     #[test]
